@@ -88,15 +88,25 @@ def get_historical_weather(latitude, longitude, start_date, end_date):
         st.error(f"Open-Meteo 과거 날씨 API 오류: {e}")
         return None
 
+# --- (★수정★) 'get_places' 함수를 디버그 모드로 변경 ---
+
 @st.cache_data(ttl=3600) # 1시간 캐시
 def get_places(api_key, coords, category_id):
-    """Foursquare API로 테마별 장소 5곳 호출 (1단계와 동일)"""
+    """Foursquare API로 테마별 장소 5곳 호출 (★디버그 모드★)"""
     try:
         url = "https://api.foursquare.com/v3/places/search"
         headers = {"Authorization": api_key, "accept": "application/json"}
         params = {"ll": coords, "categories": category_id, "limit": 5, "fields": "name,location"}
+        
+        # --- 디버깅을 위해 요청 URL과 파라미터를 사이드바에 출력 ---
+        st.sidebar.subheader("Foursquare Debug Info")
+        st.sidebar.text(url)
+        st.sidebar.json(params)
+        # ---
+        
         response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
+        response.raise_for_status() # 4xx, 5xx 오류가 있으면 여기서 except로 이동
+        
         results = response.json().get("results", [])
         
         place_list = []
@@ -105,9 +115,22 @@ def get_places(api_key, coords, category_id):
                 "이름": place.get("name"),
                 "주소": place.get("location", {}).get("formatted_address", "주소 정보 없음")
             })
+        
+        st.sidebar.success("Foursquare 호출 성공") # 성공 시 메시지
         return pd.DataFrame(place_list)
-    except requests.exceptions.RequestException:
-        return pd.DataFrame() # 오류 시 빈 DataFrame 반환
+    
+    except requests.exceptions.RequestException as e:
+        # --- (★중요★) 숨겨진 오류를 화면에 강제로 표시 ---
+        st.error(f"Foursquare API 호출 실패! (디버그 정보): {e}")
+        
+        # 서버가 보낸 구체적인 오류 응답(JSON)을 st.json()으로 출력
+        if e.response is not None:
+            try:
+                st.json(e.response.json())
+            except:
+                st.text(e.response.text) # JSON이 아닐 경우 텍스트로 표시
+        # ---
+        return pd.DataFrame() # 빈 DataFrame 반환
 
 # --- 2단계 핵심 로직: 스코어링 엔진 ---
 
