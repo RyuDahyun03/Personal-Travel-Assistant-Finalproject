@@ -1,10 +1,3 @@
----
-
-### 4. 메인 앱 코드 (2단계)
-
-1단계 `app.py` 파일의 **모든 내용을 삭제**하고, **아래의 2단계 코드로 전체를 붙여넣으세요.**
-
-```python:나만의 여행 비서 앱 (2단계 - 추천 로직 구현):app.py
 import streamlit as st
 import requests
 import pandas as pd
