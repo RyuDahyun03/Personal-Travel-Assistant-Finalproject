@@ -104,7 +104,7 @@ THEME_OSM_MAP = {
     "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# --- 2. API 키 확인 및 설정 ---
+# --- 2. API 키 확인 ---
 CALENDARIFIC_KEY = st.secrets.get("calendarific_key")
 GEMINI_KEY = st.secrets.get("gemini_key")
 
@@ -207,7 +207,6 @@ def draw_route_map(route_cities):
     map_data = []
     for i, city_key in enumerate(route_cities):
         city_data = CITY_DATA[city_key]
-        # PyDeck은 [경도, 위도] 순서
         coords = list(map(float, city_data['coords'].split(',')))[::-1]
         map_data.append({
             "coordinates": coords,
@@ -215,20 +214,17 @@ def draw_route_map(route_cities):
             "size": 50000, "color": [0, 200, 100, 200]
         })
     
-    # 1. 점 레이어
     scatter_layer = pdk.Layer(
         "ScatterplotLayer", data=map_data, get_position="coordinates",
         get_fill_color="color", get_radius="size", pickable=True,
         radius_scale=1, radius_min_pixels=10, radius_max_pixels=30
     )
-    # 2. 텍스트 레이어
     text_layer = pdk.Layer(
         "TextLayer", data=map_data, get_position="coordinates",
         get_text="name", get_size=20, get_color=[0, 0, 0],
         get_angle=0, get_text_anchor="middle", get_alignment_baseline="bottom",
         pixel_offset=[0, -20]
     )
-    # 초기 뷰 설정
     first_coords = list(map(float, CITY_DATA[route_cities[0]]['coords'].split(',')))[::-1]
     view_state = pdk.ViewState(latitude=first_coords[1], longitude=first_coords[0], zoom=3)
     
@@ -291,12 +287,10 @@ def run_mode_single_trip():
     
     col1, col2 = st.columns(2)
     with col1:
-        # [신규] 검색 기능 활성화된 selectbox
         country_key = st.selectbox("어디로 떠날까요? (도시 검색)", options=CITY_DATA.keys())
     with col2:
         theme_name = st.selectbox("여행 테마", options=THEME_OSM_MAP.keys())
 
-    # [신규] 라디오 버튼 스타일
     travel_style = st.radio("여행 스타일 (경비용)", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], index=1, horizontal=True)
     priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
@@ -377,7 +371,6 @@ def run_mode_single_trip():
 def run_mode_long_trip():
     st.header("🌏 모드 2: 장기 여행 (루트 최적화)")
     
-    # [신규] 나라 선택으로 필터링
     countries = sorted(list(set([v['country'] for v in CITY_DATA.values()])))
     selected_nations = st.multiselect("나라 선택", countries)
     
@@ -418,10 +411,8 @@ def run_mode_long_trip():
         visa_list = set()
         dl_text = "[[ 장기 여행 ]]\n"
         
-        # 총 비용 계산
         for i, city in enumerate(route):
             stay = (start_date + timedelta(total_days) - start_date).days if i == len(route)-1 else days_per_city # 단순화
-            # 실제 날짜별 비용 계산은 복잡하므로 단순 합산
             total_cost += calculate_travel_cost(city, days_per_city, travel_style)
             visa_list.add(f"{CITY_DATA[city]['country']}: {CITY_DATA[city]['visa']}")
 
@@ -463,7 +454,7 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (자동 복구 기능 탑재) ---
+# --- 모드 3: AI 챗봇 (자동 복구 + 날짜 인식 + 검색 기능) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
@@ -484,12 +475,16 @@ def run_mode_chat():
 
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
-                # [자동 복구] 사용 가능한 모델 리스트 (우선순위 순서)
-                # 중요: gemini-2.0-flash가 가장 먼저 시도됩니다.
+                # [핵심] 오늘 날짜 정보 주입
+                current_date = datetime.now().strftime("%Y년 %m월 %d일")
+                system_instruction = f"오늘은 {current_date}입니다. 미래 시점 질문 시 검색 도구를 활용해 최신 정보나 과거 데이터를 찾아 답변하세요."
+
+                # [수정] 모델 리스트 최적화: 사용자 계정에 활성화된 최신 모델(2.0)부터 시도
                 candidates = [
-                    "gemini-2.0-flash", 
-                    "gemini-2.5-flash",
-                    "gemini-1.5-flash"
+                    "gemini-2.0-flash", # 1순위
+                    "gemini-2.5-flash", # 2순위
+                    "gemini-1.5-flash", # 3순위
+                    "gemini-pro"        # 4순위
                 ]
                 
                 success = False
@@ -497,11 +492,11 @@ def run_mode_chat():
                 
                 for model_name in candidates:
                     try:
-                        # REST API 직접 호출 (라이브러리 의존성 제거)
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
                         headers = {'Content-Type': 'application/json'}
                         data = {
-                            "contents": [{"parts": [{"text": prompt}]}]
+                            "contents": [{"parts": [{"text": f"{system_instruction}\nUser: {prompt}"}]}],
+                            "tools": [{"googleSearchRetrieval": {}}]
                         }
                         response = requests.post(url, headers=headers, json=data)
                         
@@ -510,9 +505,8 @@ def run_mode_chat():
                             st.markdown(ai_msg)
                             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                             success = True
-                            break # 성공하면 루프 탈출!
+                            break
                         else:
-                            # 404 등 오류 발생 시 다음 모델 시도
                             last_error = f"{response.status_code} ({model_name})"
                             continue
                     except Exception as e:
@@ -520,7 +514,7 @@ def run_mode_chat():
                         continue
                 
                 if not success:
-                    st.error(f"모든 모델 연결에 실패했습니다. (오류: {last_error})")
+                    st.error(f"모든 모델 연결 실패 😢 (마지막 오류: {last_error})")
                     st.info("잠시 후 다시 시도해주세요.")
 
 # --- 메인 실행 ---
