@@ -283,8 +283,8 @@ def get_packing_tips(avg_temp, rain_sum):
     return ", ".join(tips)
 
 def calculate_travel_cost(daily_budget, days, style):
-    if style == "배낭여행 (절약)": multiplier = 0.6
-    elif style == "일반 (표준)": multiplier = 1.0
+    if style == "절약": multiplier = 0.6
+    elif style == "일반": multiplier = 1.0
     else: multiplier = 2.5
     return int(daily_budget * days * multiplier)
 
@@ -321,7 +321,7 @@ def run_mode_single_trip():
             with c1: theme_name = st.selectbox("여행 테마", options=THEME_OSM_MAP.keys())
             with c2: daily_budget = st.number_input("1일 예산 (원)", value=200000, step=10000)
 
-            travel_style = st.radio("스타일", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], index=1, horizontal=True)
+            travel_style = st.radio("스타일", ["절약", "일반", "럭셔리"], index=1, horizontal=True)
             priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
             today = datetime.now().date()
@@ -417,7 +417,7 @@ def run_mode_long_trip():
     with col2: total_weeks = st.slider("기간 (주)", 1, 24, 4)
     
     daily_budget = st.number_input("1일 평균 예산 (원)", value=150000)
-    travel_style = st.radio("스타일", ["배낭여행", "일반", "럭셔리"], horizontal=True)
+    travel_style = st.radio("스타일", ["절약약", "일반", "럭셔리"], horizontal=True)
 
     if st.button("🚀 루트 최적화", type="primary"):
         cities = st.session_state['selected_cities_data']
@@ -478,7 +478,7 @@ def run_mode_long_trip():
 
 # --- 모드 3: AI 챗봇 (검색 안정화) ---
 def run_mode_chat():
-    st.header("🤖 AI 여행 상담소")
+    st.header("🤖 AI 여행 플래너너")
     if not GEMINI_KEY: st.error("API 키 없음"); return
     if "messages" not in st.session_state: st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! ✈️"}]
     for msg in st.session_state.messages: st.chat_message(msg["role"]).markdown(msg["content"])
@@ -539,7 +539,7 @@ def main():
     
     with st.sidebar:
         st.title("✈️ 메뉴")
-        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)"])
+        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Short-term)", "장기 여행 (Long-term)", "AI 여행 플래너"])
         st.write("---")
         st.subheader("💸 환율 계산기")
         rates = get_exchange_rates()
@@ -549,9 +549,9 @@ def main():
             st.metric(f"{curr} 환산 금액", f"{amt * rates.get(curr, 0):,.2f} {curr}")
             st.caption(f"1 KRW = {rates.get(curr, 0):.6f} {curr}")
 
-    if app_mode == "개인 맞춤형 (Single)": run_mode_single_trip()
+    if app_mode == "개인 맞춤형 (Short-term)": run_mode_single_trip()
     elif app_mode == "장기 여행 (Long-term)": run_mode_long_trip()
-    elif app_mode == "AI 상담소 (Chat)": run_mode_chat()
+    elif app_mode == "AI 여행 플래너 (Chat)": run_mode_chat()
 
 if __name__ == "__main__":
     main()
