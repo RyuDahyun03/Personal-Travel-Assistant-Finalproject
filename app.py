@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import io
 import pydeck as pdk
 import time
-import google.generativeai as genai
+# google.generativeai 라이브러리 의존성 제거 (직접 호출하므로 불필요)
 
 # --- 1. 전 세계 주요 도시 데이터 ---
 CITY_DATA = {
@@ -113,9 +113,6 @@ def check_api_keys():
     if not CALENDARIFIC_KEY:
         st.sidebar.error("⚠️ Calendarific API 키가 설정되지 않았습니다.")
         st.stop()
-
-if GEMINI_KEY:
-    genai.configure(api_key=GEMINI_KEY)
 
 # --- 3. 핵심 유틸리티 함수 ---
 
@@ -291,7 +288,7 @@ def get_flight_link(destination_key):
 
 # --- 모드 1: 개인 맞춤형 ---
 def run_mode_single_trip():
-    st.header("🎯 개인 맞춤형 여행 추천")
+    st.header("🎯 모드 1: 개인 맞춤형 여행 추천")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -305,7 +302,7 @@ def run_mode_single_trip():
     priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
     today = datetime.now().date()
-    st.write("📅 **언제 가시나요?**")
+    st.write("📅 **언제쯤 가시나요?**")
     date_range = st.date_input(
         "기간 선택",
         value=(today+timedelta(30), today+timedelta(90)),
@@ -379,7 +376,7 @@ def run_mode_single_trip():
 
 # --- 모드 2: 장기 여행 ---
 def run_mode_long_trip():
-    st.header("🌏 장기 여행 (루트 최적화)")
+    st.header("🌏 모드 2: 장기 여행 (루트 최적화)")
     
     # [신규] 나라 선택으로 필터링
     countries = sorted(list(set([v['country'] for v in CITY_DATA.values()])))
@@ -396,7 +393,7 @@ def run_mode_long_trip():
     with col1: start_date = st.date_input("시작일", value=datetime.now().date()+timedelta(30))
     with col2: total_weeks = st.slider("기간 (주)", 1, 12, 4)
     
-    travel_style = st.radio("여행 스타일", ["절약", "일반", "럭셔리"], horizontal=True)
+    travel_style = st.radio("여행 스타일", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], horizontal=True)
     total_days = total_weeks * 7
 
     if st.button("🚀 루트 최적화", type="primary"):
@@ -424,7 +421,8 @@ def run_mode_long_trip():
         
         # 총 비용 계산
         for i, city in enumerate(route):
-            stay = (start_date + timedelta(total_days) - start_date).days if i == len(route)-1 else days_per_city
+            stay = (start_date + timedelta(total_days) - start_date).days if i == len(route)-1 else days_per_city # 단순화
+            # 실제 날짜별 비용 계산은 복잡하므로 단순 합산
             total_cost += calculate_travel_cost(city, days_per_city, travel_style)
             visa_list.add(f"{CITY_DATA[city]['country']}: {CITY_DATA[city]['visa']}")
 
@@ -466,9 +464,9 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (수정됨: 모델명 gemini-1.5-flash) ---
+# --- 모드 3: AI 챗봇 (REST API 방식 적용) ---
 def run_mode_chat():
-    st.header("🤖 AI 여행 플래너")
+    st.header("🤖 AI 여행 상담소")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
 
     if not GEMINI_KEY:
@@ -488,14 +486,22 @@ def run_mode_chat():
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
                 try:
-                    # [수정] 최신 모델명으로 변경 (404 오류 해결)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    response = model.generate_content(prompt)
-                    ai_msg = response.text
-                    st.markdown(ai_msg)
-                    st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+                    # [수정] 라이브러리 대신 REST API 직접 호출 (100% 호환)
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+                    headers = {'Content-Type': 'application/json'}
+                    data = {
+                        "contents": [{"parts": [{"text": prompt}]}]
+                    }
+                    response = requests.post(url, headers=headers, json=data)
+                    
+                    if response.status_code == 200:
+                        ai_msg = response.json()['candidates'][0]['content']['parts'][0]['text']
+                        st.markdown(ai_msg)
+                        st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+                    else:
+                        st.error(f"API 오류: {response.status_code} - {response.text}")
                 except Exception as e:
-                    st.error(f"오류가 발생했습니다: {e}")
+                    st.error(f"연결 오류가 발생했습니다: {e}")
 
 # --- 메인 실행 ---
 def main():
@@ -504,15 +510,15 @@ def main():
     
     with st.sidebar:
         st.title("✈️ 여행 비서 AI")
-        app_mode = st.radio("메뉴 선택", ["개인 맞춤형 단기 여행", "장기 여행", "AI 여행 플래너"])
+        app_mode = st.radio("메뉴 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)"])
         st.write("---")
         st.caption("Made with Streamlit")
 
-    if app_mode == "개인 맞춤형 단기 여행":
+    if app_mode == "개인 맞춤형 (Single)":
         run_mode_single_trip()
-    elif app_mode == "장기 여행":
+    elif app_mode == "장기 여행 (Long-term)":
         run_mode_long_trip()
-    elif app_mode == "AI 여행 플래너":
+    elif app_mode == "AI 상담소 (Chat)":
         run_mode_chat()
 
 if __name__ == "__main__":
