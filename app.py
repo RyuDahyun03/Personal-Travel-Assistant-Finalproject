@@ -433,13 +433,13 @@ def run_mode_long_trip():
             unvisited.remove(nearest)
             curr = nearest
 
-        days_per_city = max(2, total_days // len(route))
+        days_per_city = max(2, total_weeks * 7 // len(route))
         
         st.divider()
         st.subheader(f"🗺️ 추천 루트 ({len(route)}도시)")
         draw_route_map(route)
         
-        total_cost = calculate_travel_cost(daily_budget, total_days, travel_style)
+        total_cost = calculate_travel_cost(daily_budget, total_weeks * 7, travel_style)
         st.metric("총 예상 경비 (항공권 제외)", f"약 {total_cost//10000}만 원")
 
         st.write("---")
@@ -448,7 +448,7 @@ def run_mode_long_trip():
         pdf_lines = ["=== 세계일주 루트 ===", ""]
         
         for idx, city in enumerate(route):
-            stay = (start_date + timedelta(total_days) - start_date).days if idx == len(route)-1 else days_per_city
+            stay = (start_date + timedelta(total_weeks * 7) - curr_date).days if idx == len(route)-1 else days_per_city
             arrival, departure = curr_date, curr_date + timedelta(stay)
             
             h_start, h_end = arrival - pd.DateOffset(years=1), departure - pd.DateOffset(years=1)
@@ -476,7 +476,7 @@ def run_mode_long_trip():
         pdf_bytes = create_pdf_report(f"Long Trip Plan ({total_weeks} Weeks)", pdf_lines)
         st.download_button("📥 PDF 다운로드", data=pdf_bytes, file_name="LongTrip.pdf", mime="application/pdf")
 
-# --- 모드 3: AI 챗봇 (최종: 다중 모델 + Fallback) ---
+# --- 모드 3: AI 챗봇 (검색 안정화) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     if not GEMINI_KEY: st.error("API 키 없음"); return
@@ -487,64 +487,50 @@ def run_mode_chat():
         st.chat_message("user").markdown(prompt)
         with st.chat_message("assistant"):
             with st.spinner("생각 중..."):
-                # [수정] 모델 리스트 확장 (사용자 피드백 반영)
-                candidates = [
-                    "gemini-2.0-flash-exp", # 실험적 모델 (보통 최신 기능 포함)
-                    "gemini-2.0-flash",
-                    "gemini-2.5-flash",
-                    "gemini-1.5-flash",
-                    "gemini-pro"
-                ]
-
+                current_date = datetime.now().strftime("%Y년 %m월 %d일")
+                
+                # [수정] 검색 기능 안정화 로직: "일단 검색으로 시도해보고, 안 되면 그냥 대답한다"
+                # 모델 목록: 최신 모델부터 구형 모델까지 순차 시도
+                candidates = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
                 success = False
-                last_error = ""
-                current_date = datetime.now().strftime("%Y-%m-%d")
-
+                
                 for model_name in candidates:
-                    # 1차 시도: 구글 검색 포함
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
                         headers = {'Content-Type': 'application/json'}
-                        data = {
-                            "contents": [{"parts": [{"text": f"System: Today is {current_date}. Use google search for latest info.\nUser: {prompt}"}]}],
-                            "tools": [{"google_search_retrieval": {}}]
+                        
+                        # 1. 검색 도구 포함 시도
+                        payload_with_tool = {
+                            "contents": [{"parts": [{"text": f"System: 오늘은 {current_date}입니다. 한국어로 답변하세요. 최신 정보는 검색을 이용하세요. 코드를 작성하지 마세요.\nUser: {prompt}"}]}],
+                            "tools": [{"googleSearchRetrieval": {}}]
                         }
-                        response = requests.post(url, headers=headers, json=data)
-
-                        # 성공 시
-                        if response.status_code == 200:
-                            ai_msg = response.json()['candidates'][0]['content']['parts'][0]['text']
+                        
+                        resp = requests.post(url, headers=headers, json=payload_with_tool)
+                        
+                        # 검색 성공
+                        if resp.status_code == 200:
+                            ai_msg = resp.json()['candidates'][0]['content']['parts'][0]['text']
                             st.markdown(ai_msg)
                             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                             success = True
                             break
                         
-                        # 실패 시 분석
-                        # 404: 모델 없음 -> 다음 모델로
-                        if response.status_code == 404:
-                            last_error = f"{model_name}: 404 Not Found"
-                            continue 
-                        
-                        # 400 등 다른 에러: 도구 문제일 수 있음 -> 도구 빼고 재시도
+                        # 2. 실패 시: 검색 도구 빼고 재시도 (Fallback)
                         else:
-                            # 2차 시도: 검색 도구 제외
-                            del data['tools']
-                            response_retry = requests.post(url, headers=headers, json=data)
-                            if response_retry.status_code == 200:
-                                ai_msg = response_retry.json()['candidates'][0]['content']['parts'][0]['text']
-                                st.markdown(ai_msg + "\n\n(⚠️ 검색 기능 없이 답변했습니다.)")
+                            del payload_with_tool['tools']
+                            resp_retry = requests.post(url, headers=headers, json=payload_with_tool)
+                            if resp_retry.status_code == 200:
+                                ai_msg = resp_retry.json()['candidates'][0]['content']['parts'][0]['text']
+                                st.markdown(ai_msg)
+                                st.caption("ℹ️ (검색 기능 없이 답변되었습니다)")
                                 st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                                 success = True
                                 break
-                            else:
-                                last_error = f"{model_name}: {response_retry.status_code} - {response_retry.text}"
-                                continue
-
-                    except Exception as e:
-                        last_error = str(e)
-                        continue
+                            
+                    except Exception:
+                        continue # 다음 모델로
                 
-                if not success: st.error(f"AI 연결 실패. (오류: {last_error})")
+                if not success: st.error("AI 연결 실패. 잠시 후 시도해주세요.")
 
 # --- 메인 실행 ---
 def main():
