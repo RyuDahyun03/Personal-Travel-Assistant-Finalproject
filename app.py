@@ -1,22 +1,28 @@
 import streamlit as st
 import requests
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
-# --- 상수 정의 ---
+# --- 설정 및 데이터 ---
+# 더 많은 도시 추가 (다구간 여행 테스트용)
 COUNTRY_MAP = {
-    "일본": {"code": "JP", "city_name": "Tokyo", "coords": "35.6895,139.6917"},
-    "베트남": {"code": "VN", "city_name": "Hanoi", "coords": "21.0285,105.8542"}
+    "🇯🇵 일본 (도쿄)": {"code": "JP", "city_name": "Tokyo", "coords": "35.6895,139.6917"},
+    "🇯🇵 일본 (오사카)": {"code": "JP", "city_name": "Osaka", "coords": "34.6937,135.5023"},
+    "🇻🇳 베트남 (하노이)": {"code": "VN", "city_name": "Hanoi", "coords": "21.0285,105.8542"},
+    "🇻🇳 베트남 (다낭)": {"code": "VN", "city_name": "Da Nang", "coords": "16.0544,108.2022"},
+    "🇹🇭 태국 (방콕)": {"code": "TH", "city_name": "Bangkok", "coords": "13.7563,100.5018"},
+    "🇹🇼 대만 (타이베이)": {"code": "TW", "city_name": "Taipei", "coords": "25.0330,121.5654"},
+    "🇰🇷 한국 (서울)": {"code": "KR", "city_name": "Seoul", "coords": "37.5665,126.9780"}
 }
 
-# (변경) OSM 태그 매핑: OpenStreetMap은 'Key=Value' 형태로 검색합니다.
 THEME_OSM_MAP = {
-    "미식": '"amenity"="restaurant"',      # 식당
-    "쇼핑": '"shop"="mall"',              # 쇼핑몰/상점
-    "문화/유적": '"tourism"="attraction"'   # 관광 명소
+    "미식 🍜": '"amenity"="restaurant"',
+    "쇼핑 🛍️": '"shop"="mall"',
+    "문화/유적 🏯": '"tourism"="attraction"',
+    "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# 추천 모드별 가중치 설정
+# 추천 가중치
 WEIGHTS = {
     "가장 저렴하고 한적하게": [ 1, -1, 10,  1, -5],
     "연차 아껴서 알차게":   [ 1, -1, -5, 10,  1],
@@ -24,44 +30,34 @@ WEIGHTS = {
 }
 
 # --- API 키 로드 ---
-# Foursquare 키는 더 이상 필요하지 않습니다.
 CALENDARIFIC_KEY = st.secrets.get("calendarific_key")
 
 def check_api_keys():
-    st.sidebar.title("🔑 API 키 상태")
-    st.sidebar.info("`.streamlit/secrets.toml` 파일을 확인하세요.")
-    
-    # Calendarific 키만 확인
-    st.sidebar.markdown(f"Calendarific: {'✅' if CALENDARIFIC_KEY else '❌'}")
-    
-    # 무료 API 안내
-    st.sidebar.success("날씨(Open-Meteo) & 관광지(OSM)는 API 키가 필요 없습니다! 🎉")
-    
     if not CALENDARIFIC_KEY:
-        st.error("Calendarific API 키가 설정되지 않았습니다.")
+        st.sidebar.error("⚠️ Calendarific API 키가 설정되지 않았습니다.")
         st.stop()
 
-# --- API 호출 함수 ---
+# --- 공통 API 함수 ---
 
 @st.cache_data(ttl=3600)
 def get_holidays_for_period(api_key, country_code, start_date, end_date):
     """Calendarific API: 선택한 기간의 공휴일"""
     all_holidays = set()
+    # 날짜 범위가 길 수 있으므로 월별로 순회
     for month_start in pd.date_range(start_date, end_date, freq='MS'):
-        year = month_start.year
-        month = month_start.month
         try:
             url = "https://calendarific.com/api/v2/holidays"
-            params = {"api_key": api_key, "country": country_code, "year": year, "month": month}
-            response = requests.get(url, params=params)
-            if response.status_code == 200:
-                holidays = response.json().get("response", {}).get("holidays", [])
-                for holiday in holidays:
-                    iso_date = holiday.get("date", {}).get("iso", "")
-                    if iso_date:
-                        all_holidays.add(iso_date.split("T")[0])
-        except:
-            pass
+            params = {
+                "api_key": api_key, "country": country_code, 
+                "year": month_start.year, "month": month_start.month
+            }
+            res = requests.get(url, params=params)
+            if res.status_code == 200:
+                holidays = res.json().get("response", {}).get("holidays", [])
+                for h in holidays:
+                    iso = h.get("date", {}).get("iso", "")
+                    if iso: all_holidays.add(iso.split("T")[0])
+        except: pass
     return all_holidays
 
 @st.cache_data(ttl=3600)
@@ -70,178 +66,244 @@ def get_historical_weather(latitude, longitude, start_date, end_date):
     try:
         url = "https://archive-api.open-meteo.com/v1/archive"
         params = {
-            "latitude": latitude,
-            "longitude": longitude,
-            "start_date": start_date,
-            "end_date": end_date,
+            "latitude": latitude, "longitude": longitude,
+            "start_date": start_date, "end_date": end_date,
             "daily": "temperature_2m_max,precipitation_sum",
             "timezone": "auto"
         }
-        response = requests.get(url, params=params)
-        response.raise_for_status()
-        return response.json()
-    except Exception as e:
-        return None
+        res = requests.get(url, params=params)
+        res.raise_for_status()
+        return res.json()
+    except: return None
 
 @st.cache_data(ttl=3600)
 def get_places_osm(lat, lon, osm_tag):
-    """(신규) OpenStreetMap(Overpass API)으로 주변 장소 검색"""
+    """OpenStreetMap: 주변 장소 검색"""
     try:
-        # Overpass QL 쿼리 작성 (반경 3km 내 검색)
         overpass_url = "http://overpass-api.de/api/interpreter"
         query = f"""
         [out:json];
-        (
-          node[{osm_tag}](around:3000, {lat}, {lon});
-          way[{osm_tag}](around:3000, {lat}, {lon});
-        );
+        (node[{osm_tag}](around:3000, {lat}, {lon});
+         way[{osm_tag}](around:3000, {lat}, {lon}););
         out center 5; 
         """
-        # 'out center 5;' -> 중심점 좌표 포함하여 상위 5개만 출력
+        res = requests.get(overpass_url, params={'data': query})
+        res.raise_for_status()
+        data = res.json()
         
-        response = requests.get(overpass_url, params={'data': query})
-        response.raise_for_status()
-        data = response.json()
-        
-        place_list = []
-        for element in data.get('elements', []):
-            name = element.get('tags', {}).get('name')
-            # 이름이 있는 장소만 가져오기
+        places = []
+        for el in data.get('elements', []):
+            name = el.get('tags', {}).get('name')
             if name:
-                # 위도/경도 정보 추출 (Node는 lat/lon, Way는 center 사용)
-                p_lat = element.get('lat') or element.get('center', {}).get('lat')
-                p_lon = element.get('lon') or element.get('center', {}).get('lon')
-                
-                place_list.append({
-                    "이름": name,
-                    "위치(좌표)": f"{p_lat}, {p_lon}",
-                    "유형": element.get('tags', {}).get('amenity') or element.get('tags', {}).get('tourism') or "장소"
-                })
-        
-        return pd.DataFrame(place_list)
-        
-    except Exception as e:
-        st.sidebar.error(f"OSM API 오류: {e}")
-        return pd.DataFrame()
+                lat = el.get('lat') or el.get('center', {}).get('lat')
+                lon = el.get('lon') or el.get('center', {}).get('lon')
+                places.append({"이름": name, "위치": f"{lat}, {lon}"})
+        return pd.DataFrame(places)
+    except: return pd.DataFrame()
 
-# --- 스코어링 엔진 ---
+# --- 데이터 처리 엔진 ---
 
-def create_data_frame(weather_json, local_holidays, kr_holidays, start_date, end_date):
-    if not weather_json or 'daily' not in weather_json:
-        return pd.DataFrame()
+def create_base_dataframe(weather_json, start_date, end_date):
+    if not weather_json or 'daily' not in weather_json: return pd.DataFrame()
     df = pd.DataFrame(weather_json['daily'])
     df['date'] = pd.to_datetime(df['time'])
     df = df.set_index('date').drop(columns='time')
-    
-    date_str_index = df.index.strftime('%Y-%m-%d')
-    df['is_local_holiday'] = date_str_index.isin(local_holidays)
-    df['is_kr_holiday'] = date_str_index.isin(kr_holidays)
-    df['is_weekend'] = df.index.dayofweek >= 5
-    df['is_busy'] = df['is_local_holiday'] | df['is_kr_holiday'] | df['is_weekend']
-    df['is_free_day'] = df['is_kr_holiday'] | df['is_weekend']
     return df
 
-def run_scoring_engine(df, trip_duration, weights):
-    results = []
-    for i in range(len(df) - trip_duration + 1):
-        window = df.iloc[i : i + trip_duration]
-        
-        score_temp = window['temperature_2m_max'].mean()
-        score_rain = window['precipitation_sum'].sum()
-        score_price = window['is_busy'].sum()
-        score_eff = window['is_free_day'].sum()
-        score_exp = window['is_local_holiday'].sum()
-        
-        final_score = (
-            (score_temp * weights[0]) +
-            (score_rain * weights[1]) +
-            (score_price * -weights[2]) +
-            (score_eff * weights[3]) +
-            (score_exp * weights[4])
-        )
-        
-        start_date = window.index[0] + pd.DateOffset(years=1)
-        end_date = window.index[-1] + pd.DateOffset(years=1)
-        
-        results.append({
-            "start_date": start_date.strftime('%Y-%m-%d'),
-            "end_date": end_date.strftime('%Y-%m-%d'),
-            "score": final_score,
-            "details": {
-                "temp": score_temp, "rain": score_rain,
-                "eff": score_eff, "exp": score_exp, "price": score_price
-            }
-        })
-    return sorted(results, key=lambda x: x['score'], reverse=True)
-
-# --- 메인 함수 ---
-def main():
-    st.title("나만의 여행 비서 앱 ✈️ (OSM 버전)")
-    st.caption("Foursquare 대신 완전 무료 OpenStreetMap 사용")
+def calculate_daily_score(df, local_holidays, kr_holidays):
+    """일별 점수 계산 (벡터 연산)"""
+    date_str = df.index.strftime('%Y-%m-%d')
+    df['is_local_holiday'] = date_str.isin(local_holidays)
+    df['is_kr_holiday'] = date_str.isin(kr_holidays)
+    df['is_weekend'] = df.index.dayofweek >= 5
     
-    check_api_keys()
-
-    st.subheader("1. 여행 기본 정보 입력")
-    country_name = st.selectbox("국가 선택", options=COUNTRY_MAP.keys())
+    # 점수 요소 계산
+    # 1. 날씨 점수 (20~25도가 최고, 비오면 감점)
+    df['score_weather'] = 10 - abs(df['temperature_2m_max'] - 23) # 23도 기준
+    df['score_rain'] = -df['precipitation_sum'] * 2 # 비 1mm당 2점 감점
     
+    # 2. 효율/가격/테마 (단순화된 로직)
+    df['score_busy'] = (df['is_local_holiday'] | df['is_weekend']).astype(int) * -5
+    df['score_free'] = (df['is_kr_holiday'] | df['is_weekend']).astype(int) * 5
+    
+    # 종합 점수 (단순 합산)
+    df['total_score'] = df['score_weather'] + df['score_rain'] + df['score_busy'] + df['score_free']
+    return df
+
+# --- 모드 1: 개인 맞춤형 (기존 로직) ---
+def run_mode_single_trip():
+    st.header("🎯 모드 1: 개인 맞춤형 여행 추천")
+    st.caption("한 도시를 깊이 있게 여행하고 싶을 때, 최적의 날짜를 찾아드립니다.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        country_key = st.selectbox("어디로 떠날까요?", options=COUNTRY_MAP.keys())
+    with col2:
+        theme_name = st.selectbox("여행 테마는?", options=THEME_OSM_MAP.keys())
+
     today = datetime.now().date()
     date_range = st.date_input(
-        "여행 희망 기간 (작년 날씨 분석)",
-        value=(today + pd.DateOffset(months=3), today + pd.DateOffset(months=6))
+        "언제쯤 가고 싶으신가요? (기간 설정)",
+        value=(today + timedelta(days=90), today + timedelta(days=120))
     )
-    trip_duration = st.number_input("여행 기간 (일)", 3, 16, 5)
-    theme_name = st.selectbox("주요 테마 선택", options=THEME_OSM_MAP.keys())
-    
-    st.subheader("2. 추천 우선순위 선택")
-    mode = st.radio("추천 모드", options=WEIGHTS.keys(), horizontal=True)
+    trip_duration = st.slider("여행 기간 (박)", 3, 14, 5)
 
-    if st.button("최적의 여행 기간 추천받기"):
-        country_data = COUNTRY_MAP[country_name]
-        osm_tag = THEME_OSM_MAP[theme_name]
-        weights = WEIGHTS[mode]
+    if st.button("최적 날짜 찾기", type="primary"):
+        if len(date_range) < 2: st.error("기간을 정확히 선택해주세요."); st.stop()
+        
+        country_data = COUNTRY_MAP[country_key]
         lat, lon = country_data["coords"].split(',')
-
-        if not date_range or len(date_range) < 2:
-            st.error("날짜 범위를 선택해주세요.")
-            st.stop()
-            
         start_date, end_date = date_range
+        
+        # 작년 날씨 가져오기
         hist_start = start_date - pd.DateOffset(years=1)
         hist_end = end_date - pd.DateOffset(years=1)
-
-        with st.spinner("데이터 분석 및 관광지 검색 중..."):
-            # API 호출
-            weather_data = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
-            local_holidays = get_holidays_for_period(CALENDARIFIC_KEY, country_data["code"], start_date, end_date)
-            kr_holidays = get_holidays_for_period(CALENDARIFIC_KEY, "KR", start_date, end_date)
+        
+        with st.spinner("데이터 분석 중..."):
+            weather = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
+            local_h = get_holidays_for_period(CALENDARIFIC_KEY, country_data["code"], start_date, end_date)
+            kr_h = get_holidays_for_period(CALENDARIFIC_KEY, "KR", start_date, end_date)
+            places = get_places_osm(lat, lon, THEME_OSM_MAP[theme_name])
             
-            # (변경) OSM 호출
-            places_df = get_places_osm(lat, lon, osm_tag)
-
-            if not weather_data:
-                st.error("날씨 데이터 오류")
-                st.stop()
-
-            df = create_data_frame(weather_data, local_holidays, kr_holidays, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
-            results = run_scoring_engine(df, trip_duration, weights)
+            df = create_base_dataframe(weather, hist_start, hist_end)
+            if df.empty: st.error("날씨 데이터 없음"); st.stop()
             
-            if not results:
-                st.warning("적절한 기간을 찾지 못했습니다.")
-                st.stop()
+            # 점수 계산 및 윈도우 합산
+            df = calculate_daily_score(df, local_h, kr_h)
+            
+            best_periods = []
+            for i in range(len(df) - trip_duration + 1):
+                window = df.iloc[i : i + trip_duration]
+                score = window['total_score'].mean()
+                start = window.index[0] + pd.DateOffset(years=1)
+                end = window.index[-1] + pd.DateOffset(years=1)
+                best_periods.append({"start": start, "end": end, "score": score, "window": window})
+            
+            best_periods.sort(key=lambda x: x['score'], reverse=True)
+            
+            # 결과 출력
+            top = best_periods[0]
+            st.success(f"🏆 추천 일정: {top['start'].strftime('%Y-%m-%d')} ~ {top['end'].strftime('%Y-%m-%d')}")
+            
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                st.metric("예상 평균 기온", f"{top['window']['temperature_2m_max'].mean():.1f}°C")
+                st.metric("예상 강수량", f"{top['window']['precipitation_sum'].sum():.1f}mm")
+            with col_b:
+                st.write("**추천 장소:**")
+                st.dataframe(places, hide_index=True)
 
-        # 결과 표시
-        st.subheader(f"🎉 '{mode}' Top 3 추천")
-        for i, res in enumerate(results[:3]):
-            d = res['details']
-            with st.expander(f"🥇 {i+1}위: {res['start_date']} ~ {res['end_date']} ({res['score']:.0f}점)"):
-                st.write(f"**날씨:** {d['temp']:.1f}°C / 강수 {d['rain']:.1f}mm")
-                st.write(f"**효율:** 연차 절약 {int(d['eff'])}일, 축제 {int(d['exp'])}일")
+# --- 모드 2: 다구간/장기 여행 (신규 로직) ---
+def run_mode_multi_trip():
+    st.header("🌏 모드 2: 다구간 효율적 일정 짜기")
+    st.caption("여러 도시를 여행할 때, '어느 도시를 먼저 가는 게 좋을지' 날씨와 시즌을 비교해드립니다.")
+
+    selected_countries = st.multiselect(
+        "방문하고 싶은 도시들을 모두 선택하세요 (2개 이상)",
+        options=COUNTRY_MAP.keys(),
+        default=[list(COUNTRY_MAP.keys())[0], list(COUNTRY_MAP.keys())[2]]
+    )
+
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("여행 시작 가능일", value=datetime.now().date() + timedelta(days=30))
+    with col2:
+        total_months = st.slider("전체 여행 가능 기간 (개월)", 1, 6, 3)
+
+    end_date = start_date + pd.DateOffset(months=total_months)
+    
+    if st.button("도시별 최적 시기 비교하기", type="primary"):
+        if len(selected_countries) < 2:
+            st.warning("비교를 위해 2개 이상의 도시를 선택해주세요.")
+            st.stop()
+            
+        # 차트용 데이터 수집
+        comparison_data = []
+        
+        progress_bar = st.progress(0)
+        
+        hist_start = start_date - pd.DateOffset(years=1)
+        hist_end = end_date - pd.DateOffset(years=1)
+        
+        for idx, country_key in enumerate(selected_countries):
+            data = COUNTRY_MAP[country_key]
+            lat, lon = data["coords"].split(',')
+            
+            weather = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
+            df = create_base_dataframe(weather, hist_start, hist_end)
+            
+            if not df.empty:
+                # 쾌적도 점수만 계산 (이동 평균)
+                # 23도에 가까울수록, 비가 안 올수록 높은 점수
+                df['score'] = (10 - abs(df['temperature_2m_max'] - 23)) - (df['precipitation_sum'] * 0.5)
+                # 7일 이동평균선 (부드러운 그래프를 위해)
+                df['smooth_score'] = df['score'].rolling(window=7).mean()
                 
-                if not places_df.empty:
-                    st.write(f"**🗺️ 주변 '{theme_name}' 추천 장소 (OpenStreetMap):**")
-                    st.dataframe(places_df)
-                else:
-                    st.info("주변에 해당 테마의 장소 데이터가 없습니다.")
+                # 날짜를 올해/내년으로 변환하여 차트에 추가
+                for date, row in df.iterrows():
+                    current_date = date + pd.DateOffset(years=1)
+                    if not pd.isna(row['smooth_score']):
+                        comparison_data.append({
+                            "날짜": current_date,
+                            "도시": data["city_name"], # 영어 이름으로 표시 (차트 가독성)
+                            "여행 적합도": row['smooth_score']
+                        })
+            
+            progress_bar.progress((idx + 1) / len(selected_countries))
+
+        if comparison_data:
+            st.divider()
+            st.subheader("📊 도시별 여행 적합도 흐름")
+            st.info("그래프가 **높을수록** 여행하기 좋은 날씨(맑고 쾌적함)입니다. 그래프가 교차하는 지점을 보고 이동 순서를 정해보세요!")
+            
+            chart_df = pd.DataFrame(comparison_data)
+            
+            # 라인 차트로 시각화
+            st.line_chart(
+                chart_df,
+                x="날짜",
+                y="여행 적합도",
+                color="도시",
+                height=400
+            )
+            
+            # 간단한 조언 생성
+            st.subheader("💡 AI의 일정 조언")
+            best_days = chart_df.loc[chart_df.groupby("도시")["여행 적합도"].idxmax()]
+            best_days = best_days.sort_values("날짜")
+            
+            st.write("날씨 데이터를 기반으로 추천하는 방문 순서는 다음과 같습니다:")
+            order_str = ""
+            for _, row in best_days.iterrows():
+                date_str = row['날짜'].strftime('%Y년 %m월')
+                st.markdown(f"- **{row['도시']}**: {date_str} 경에 최고점 도달")
+        else:
+            st.error("데이터를 불러오지 못했습니다.")
+
+# --- 메인 앱 실행 ---
+def main():
+    st.set_page_config(page_title="Travel Planner AI", page_icon="✈️")
+    
+    check_api_keys()
+    
+    with st.sidebar:
+        st.title("✈️ 여행 비서 AI")
+        st.write("원하는 모드를 선택하세요.")
+        app_mode = st.radio(
+            "선택 메뉴",
+            ["개인 맞춤형 (Single)", "다구간 효율 (Multi)"],
+            index=0
+        )
+        st.divider()
+        st.markdown("**API Status**")
+        st.success("Calendarific ✅")
+        st.success("Open-Meteo ✅")
+        st.success("OpenStreetMap ✅")
+
+    if app_mode == "개인 맞춤형 (Single)":
+        run_mode_single_trip()
+    elif app_mode == "다구간 효율 (Multi)":
+        run_mode_multi_trip()
 
 if __name__ == "__main__":
     main()
