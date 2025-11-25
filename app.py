@@ -188,9 +188,9 @@ def calculate_travel_cost(city_key, days, style):
     """경비 계산 함수"""
     base_cost = CITY_DATA[city_key]['cost']
     
-    if style == "배낭여행 (절약)":
+    if style == "절약":
         multiplier = 0.6
-    elif style == "일반 (표준)":
+    elif style == "표준":
         multiplier = 1.0
     else: # 럭셔리
         multiplier = 2.5
