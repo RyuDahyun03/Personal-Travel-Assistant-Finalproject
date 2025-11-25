@@ -417,7 +417,7 @@ def run_mode_long_trip():
     with col2: total_weeks = st.slider("기간 (주)", 1, 24, 4)
     
     daily_budget = st.number_input("1일 평균 예산 (원)", value=150000)
-    travel_style = st.radio("스타일", ["절약약", "일반", "럭셔리"], horizontal=True)
+    travel_style = st.radio("스타일", ["절약", "일반", "럭셔리"], horizontal=True)
 
     if st.button("🚀 루트 최적화", type="primary"):
         cities = st.session_state['selected_cities_data']
