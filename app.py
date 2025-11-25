@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timedelta
 
-# --- 1. 전 세계 주요 도시 데이터 (확장됨) ---
+# --- 1. 전 세계 주요 도시 데이터 ---
 COUNTRY_MAP = {
     # 아시아
     "🇯🇵 일본 (도쿄)": {"code": "JP", "city_name": "Tokyo", "coords": "35.6895,139.6917"},
@@ -94,7 +94,7 @@ def get_historical_weather(latitude, longitude, start_date, end_date):
 
 @st.cache_data(ttl=3600)
 def get_places_osm(lat, lon, osm_tag):
-    """(수정됨) OpenStreetMap: 구글 지도 링크 생성"""
+    """OpenStreetMap: 구글 지도 링크 생성"""
     try:
         overpass_url = "http://overpass-api.de/api/interpreter"
         query = f"""
@@ -119,7 +119,7 @@ def get_places_osm(lat, lon, osm_tag):
                 
                 places.append({
                     "장소명": name,
-                    "지도 보기": map_link # LinkColumn으로 표시할 데이터
+                    "지도 보기": map_link
                 })
         return pd.DataFrame(places)
     except: return pd.DataFrame()
@@ -133,20 +133,29 @@ def create_base_dataframe(weather_json, start_date, end_date):
     df = df.set_index('date').drop(columns='time')
     return df
 
-def calculate_daily_score(df, local_holidays, kr_holidays):
+def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
     """일별 점수 계산"""
     date_str = df.index.strftime('%Y-%m-%d')
     df['is_local_holiday'] = date_str.isin(local_holidays)
     df['is_kr_holiday'] = date_str.isin(kr_holidays)
     df['is_weekend'] = df.index.dayofweek >= 5
     
-    # 점수: 23도 근처면 고득점, 비오면 감점
+    # [중요 수정] 연휴 계산을 위한 컬럼 명시적 생성
+    df['is_free_day'] = df['is_kr_holiday'] | df['is_weekend']
+    
+    # 1. 날씨 점수 (23도 근처면 고득점, 비오면 감점)
     df['score_weather'] = 10 - abs(df['temperature_2m_max'] - 23)
     df['score_rain'] = -df['precipitation_sum'] * 2
     
-    # 붐빔/효율 점수
-    df['score_busy'] = (df['is_local_holiday'] | df['is_weekend']).astype(int) * -5
-    df['score_free'] = (df['is_kr_holiday'] | df['is_weekend']).astype(int) * 5
+    # 2. 우선순위에 따른 가중치 변경 로직
+    if priority_mode == "비용 절감 (휴일 제외)":
+        # 비용 절감 모드: 공휴일과 주말은 '비싼 기간'이므로 대폭 감점 (-10점)
+        df['score_busy'] = (df['is_local_holiday'] | df['is_kr_holiday'] | df['is_weekend']).astype(int) * -10
+        df['score_free'] = 0 # 연차 효율은 고려하지 않음
+    else:
+        # 연차 효율 모드 (기본): 현지 공휴일은 붐벼서 감점, 한국 공휴일/주말은 쉬는 날이라 가산점
+        df['score_busy'] = (df['is_local_holiday'] | df['is_weekend']).astype(int) * -5
+        df['score_free'] = df['is_free_day'].astype(int) * 5
     
     df['total_score'] = df['score_weather'] + df['score_rain'] + df['score_busy'] + df['score_free']
     return df
@@ -162,15 +171,32 @@ def run_mode_single_trip():
     with col2:
         theme_name = st.selectbox("여행 테마는?", options=THEME_OSM_MAP.keys())
 
-    today = datetime.now().date()
-    date_range = st.date_input(
-        "여행 희망 범위 (최대 1년 이내)",
-        value=(today + timedelta(days=30), today + timedelta(days=90))
+    priority_mode = st.radio(
+        "여행 우선순위 선택", 
+        ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], 
+        horizontal=True,
+        help="비용 절감을 선택하면 항공권이 비싼 공휴일/주말을 피해서 추천합니다."
     )
+
+    today = datetime.now().date()
+    
+    # [수정] 달력형 날짜 선택 (min_value, max_value 설정으로 달력 UI 강화)
+    st.write("📅 **언제쯤 여행을 떠나시나요? (검색 범위 선택)**")
+    date_range = st.date_input(
+        "시작일과 종료일을 달력에서 선택해주세요",
+        value=(today + timedelta(days=30), today + timedelta(days=90)), # 기본값
+        min_value=today,
+        max_value=today + timedelta(days=365),
+        format="YYYY-MM-DD"
+    )
+    
     trip_duration = st.slider("여행 기간 (박)", 3, 14, 5)
 
     if st.button("최적 일정 Top 3 찾기", type="primary"):
-        if len(date_range) < 2: st.error("기간을 정확히 선택해주세요."); st.stop()
+        # 날짜 범위 선택 검증
+        if len(date_range) < 2: 
+            st.error("달력에서 시작일과 종료일을 모두 선택해주세요.")
+            st.stop()
         
         country_data = COUNTRY_MAP[country_key]
         lat, lon = country_data["coords"].split(',')
@@ -185,13 +211,13 @@ def run_mode_single_trip():
             local_h = get_holidays_for_period(CALENDARIFIC_KEY, country_data["code"], start_date, end_date)
             kr_h = get_holidays_for_period(CALENDARIFIC_KEY, "KR", start_date, end_date)
             
-            # (수정) OSM 장소 데이터 (지도 링크 포함)
             places_df = get_places_osm(lat, lon, THEME_OSM_MAP[theme_name])
             
             df = create_base_dataframe(weather, hist_start, hist_end)
             if df.empty: st.error("날씨 데이터가 없습니다."); st.stop()
             
-            df = calculate_daily_score(df, local_h, kr_h)
+            # [수정된 함수 사용]
+            df = calculate_daily_score(df, local_h, kr_h, priority_mode)
             
             # 슬라이딩 윈도우로 점수 매기기
             best_periods = []
@@ -212,8 +238,8 @@ def run_mode_single_trip():
 
             st.divider()
             st.subheader(f"🏆 {country_key} 추천 일정 Best 3")
+            st.caption(f"선택하신 '{priority_mode}' 기준에 맞춰 추천되었습니다.")
             
-            # (수정) Top 3 반복 출력
             for i, period in enumerate(top_3):
                 p_start = period['start'].strftime('%Y-%m-%d')
                 p_end = period['end'].strftime('%Y-%m-%d')
@@ -221,7 +247,6 @@ def run_mode_single_trip():
                 temp_avg = period['window']['temperature_2m_max'].mean()
                 rain_sum = period['window']['precipitation_sum'].sum()
                 
-                # 이모지 선정
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
                 with st.expander(f"{medal} {i+1}순위: {p_start} ~ {p_end} (종합 점수: {score:.0f}점)", expanded=(i==0)):
@@ -229,7 +254,7 @@ def run_mode_single_trip():
                     c1.metric("예상 평균 기온", f"{temp_avg:.1f}°C")
                     c2.metric("예상 총 강수량", f"{rain_sum:.1f}mm")
                     
-                    # 주말/공휴일 개수 세기
+                    # 주말/공휴일 개수 세기 (정상 작동)
                     free_days = period['window']['is_free_day'].sum()
                     c3.metric("연휴/주말 포함", f"{free_days}일")
                     
@@ -237,7 +262,6 @@ def run_mode_single_trip():
                     st.markdown(f"**🗺️ '{theme_name}' 테마 추천 장소** (클릭하여 위치 확인)")
                     
                     if not places_df.empty:
-                        # (수정) 데이터프레임에 링크 기능 적용
                         st.dataframe(
                             places_df,
                             column_config={
@@ -258,12 +282,17 @@ def run_mode_multi_trip():
     selected_countries = st.multiselect(
         "방문하고 싶은 도시들을 모두 선택하세요 (2개 이상)",
         options=COUNTRY_MAP.keys(),
-        default=[list(COUNTRY_MAP.keys())[0], list(COUNTRY_MAP.keys())[4]] # 도쿄, 하노이
+        default=[list(COUNTRY_MAP.keys())[0], list(COUNTRY_MAP.keys())[4]]
     )
 
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("여행 시작 가능일", value=datetime.now().date() + timedelta(days=30))
+        # 모드 2도 달력형으로 깔끔하게 표시
+        start_date = st.date_input(
+            "📅 여행 시작 가능일", 
+            value=datetime.now().date() + timedelta(days=30),
+            min_value=datetime.now().date()
+        )
     with col2:
         total_months = st.slider("전체 여행 가능 기간 (개월)", 1, 6, 3)
 
