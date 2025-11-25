@@ -140,7 +140,7 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
     df['is_kr_holiday'] = date_str.isin(kr_holidays)
     df['is_weekend'] = df.index.dayofweek >= 5
     
-    # [중요 수정] 연휴 계산을 위한 컬럼 명시적 생성
+    # [오류 수정 유지] is_free_day 컬럼 생성
     df['is_free_day'] = df['is_kr_holiday'] | df['is_weekend']
     
     # 1. 날씨 점수 (23도 근처면 고득점, 비오면 감점)
@@ -149,11 +149,9 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
     
     # 2. 우선순위에 따른 가중치 변경 로직
     if priority_mode == "비용 절감 (휴일 제외)":
-        # 비용 절감 모드: 공휴일과 주말은 '비싼 기간'이므로 대폭 감점 (-10점)
         df['score_busy'] = (df['is_local_holiday'] | df['is_kr_holiday'] | df['is_weekend']).astype(int) * -10
-        df['score_free'] = 0 # 연차 효율은 고려하지 않음
+        df['score_free'] = 0 
     else:
-        # 연차 효율 모드 (기본): 현지 공휴일은 붐벼서 감점, 한국 공휴일/주말은 쉬는 날이라 가산점
         df['score_busy'] = (df['is_local_holiday'] | df['is_weekend']).astype(int) * -5
         df['score_free'] = df['is_free_day'].astype(int) * 5
     
@@ -179,12 +177,10 @@ def run_mode_single_trip():
     )
 
     today = datetime.now().date()
-    
-    # [수정] 달력형 날짜 선택 (min_value, max_value 설정으로 달력 UI 강화)
     st.write("📅 **언제쯤 여행을 떠나시나요? (검색 범위 선택)**")
     date_range = st.date_input(
         "시작일과 종료일을 달력에서 선택해주세요",
-        value=(today + timedelta(days=30), today + timedelta(days=90)), # 기본값
+        value=(today + timedelta(days=30), today + timedelta(days=90)),
         min_value=today,
         max_value=today + timedelta(days=365),
         format="YYYY-MM-DD"
@@ -193,7 +189,6 @@ def run_mode_single_trip():
     trip_duration = st.slider("여행 기간 (박)", 3, 14, 5)
 
     if st.button("최적 일정 Top 3 찾기", type="primary"):
-        # 날짜 범위 선택 검증
         if len(date_range) < 2: 
             st.error("달력에서 시작일과 종료일을 모두 선택해주세요.")
             st.stop()
@@ -216,7 +211,6 @@ def run_mode_single_trip():
             df = create_base_dataframe(weather, hist_start, hist_end)
             if df.empty: st.error("날씨 데이터가 없습니다."); st.stop()
             
-            # [수정된 함수 사용]
             df = calculate_daily_score(df, local_h, kr_h, priority_mode)
             
             # 슬라이딩 윈도우로 점수 매기기
@@ -236,9 +230,31 @@ def run_mode_single_trip():
                 st.warning("추천할 만한 기간을 찾지 못했습니다.")
                 st.stop()
 
+            # --- 결과 출력 화면 구성 ---
             st.divider()
-            st.subheader(f"🏆 {country_key} 추천 일정 Best 3")
-            st.caption(f"선택하신 '{priority_mode}' 기준에 맞춰 추천되었습니다.")
+            
+            # [변경 1] 추천 장소는 최상단에 딱 한 번만 표시
+            st.subheader(f"🗺️ '{theme_name}' 추천 장소 ({country_key})")
+            if not places_df.empty:
+                st.info("각 날짜별 추천 기간에 방문하기 좋은 장소들입니다. (위치 클릭 시 구글 지도로 이동)")
+                st.dataframe(
+                    places_df,
+                    column_config={
+                        "지도 보기": st.column_config.LinkColumn(
+                            "구글 지도", display_text="📍 지도 열기"
+                        )
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+            else:
+                st.info("주변 장소 데이터를 찾지 못했습니다.")
+
+            st.write("---")
+
+            # [변경 2] 날짜 추천 리스트는 아래에 표시 (장소 정보 중복 제거)
+            st.subheader(f"🏆 추천 여행 기간 Best 3")
+            st.caption(f"선택하신 '{priority_mode}' 기준에 맞춰 점수가 가장 높은 기간입니다.")
             
             for i, period in enumerate(top_3):
                 p_start = period['start'].strftime('%Y-%m-%d')
@@ -249,30 +265,22 @@ def run_mode_single_trip():
                 
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
+                # Top 3 날짜는 Expander로 보여주되, 안에 장소 정보는 뺌 (위에서 보여줬으므로)
                 with st.expander(f"{medal} {i+1}순위: {p_start} ~ {p_end} (종합 점수: {score:.0f}점)", expanded=(i==0)):
                     c1, c2, c3 = st.columns(3)
                     c1.metric("예상 평균 기온", f"{temp_avg:.1f}°C")
                     c2.metric("예상 총 강수량", f"{rain_sum:.1f}mm")
                     
-                    # 주말/공휴일 개수 세기 (정상 작동)
                     free_days = period['window']['is_free_day'].sum()
                     c3.metric("연휴/주말 포함", f"{free_days}일")
                     
-                    st.write("---")
-                    st.markdown(f"**🗺️ '{theme_name}' 테마 추천 장소** (클릭하여 위치 확인)")
-                    
-                    if not places_df.empty:
-                        st.dataframe(
-                            places_df,
-                            column_config={
-                                "지도 보기": st.column_config.LinkColumn(
-                                    "구글 지도", display_text="📍 지도 열기"
-                                )
-                            },
-                            hide_index=True
-                        )
-                    else:
-                        st.info("주변 장소 데이터를 찾지 못했습니다.")
+                    # 추가적인 날씨 코멘트
+                    if temp_avg > 28:
+                        st.caption("🥵 날씨가 꽤 더울 수 있으니 시원한 옷차림을 준비하세요.")
+                    elif temp_avg < 5:
+                        st.caption("🥶 날씨가 추울 수 있으니 따뜻한 옷차림을 준비하세요.")
+                    elif 15 <= temp_avg <= 25:
+                        st.caption("🌿 여행하기 가장 쾌적한 날씨입니다!")
 
 # --- 모드 2: 다구간/장기 여행 ---
 def run_mode_multi_trip():
@@ -287,7 +295,6 @@ def run_mode_multi_trip():
 
     col1, col2 = st.columns(2)
     with col1:
-        # 모드 2도 달력형으로 깔끔하게 표시
         start_date = st.date_input(
             "📅 여행 시작 가능일", 
             value=datetime.now().date() + timedelta(days=30),
@@ -315,7 +322,6 @@ def run_mode_multi_trip():
             df = create_base_dataframe(weather, hist_start, hist_end)
             
             if not df.empty:
-                # 쾌적도 점수 (이동 평균)
                 df['score'] = (10 - abs(df['temperature_2m_max'] - 23)) - (df['precipitation_sum'] * 0.5)
                 df['smooth_score'] = df['score'].rolling(window=7).mean()
                 
@@ -352,8 +358,9 @@ def main():
     with st.sidebar:
         st.title("✈️ 여행 비서 AI")
         app_mode = st.radio("선택 메뉴", ["개인 맞춤형 (Single)", "다구간 효율 (Multi)"])
-        st.info("지원 도시: 아시아, 유럽, 미주 등 전 세계 30개 주요 도시")
-        st.success("Calendarific / Open-Meteo / OpenStreetMap 연동")
+        # [변경] 사이드바 API 상태 표시 삭제 (깔끔하게)
+        st.write("---")
+        st.caption("Made with Streamlit")
 
     if app_mode == "개인 맞춤형 (Single)":
         run_mode_single_trip()
