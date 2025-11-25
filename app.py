@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import io
 import pydeck as pdk
 import time
-# google.generativeai 라이브러리 의존성 제거 (직접 호출하므로 불필요)
+# google.generativeai 라이브러리 의존성 제거
 
 # --- 1. 전 세계 주요 도시 데이터 ---
 CITY_DATA = {
@@ -105,7 +105,7 @@ THEME_OSM_MAP = {
     "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# --- 2. API 키 확인 및 설정 ---
+# --- 2. API 키 확인 ---
 CALENDARIFIC_KEY = st.secrets.get("calendarific_key")
 GEMINI_KEY = st.secrets.get("gemini_key")
 
@@ -464,7 +464,7 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (REST API 방식 적용) ---
+# --- 모드 3: AI 챗봇 (수정됨: REST API, gemini-pro) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
@@ -486,8 +486,8 @@ def run_mode_chat():
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
                 try:
-                    # [수정] 라이브러리 대신 REST API 직접 호출 (100% 호환)
-                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}"
+                    # [수정] REST API 직접 호출 (모델명 gemini-pro로 변경)
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={GEMINI_KEY}"
                     headers = {'Content-Type': 'application/json'}
                     data = {
                         "contents": [{"parts": [{"text": prompt}]}]
