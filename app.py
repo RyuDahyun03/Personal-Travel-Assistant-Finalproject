@@ -1,9 +1,10 @@
 import streamlit as st
 import requests
 import pandas as pd
+import math
 from datetime import datetime, timedelta
 
-# --- 1. 전 세계 주요 도시 데이터 (50개 도시 확장) ---
+# --- 1. 전 세계 주요 도시 데이터 ---
 CITY_DATA = {
     # [동북아시아]
     "🇯🇵 일본 (도쿄)": {"code": "JP", "city": "Tokyo", "coords": "35.6895,139.6917", "country": "일본"},
@@ -79,7 +80,23 @@ def check_api_keys():
         st.sidebar.error("⚠️ Calendarific API 키가 설정되지 않았습니다.")
         st.stop()
 
-# --- 3. 공통 API 함수 ---
+# --- 3. 공통 API 및 유틸리티 함수 ---
+
+# [신규] 거리 계산 함수 (Haversine formula)
+def calculate_distance(coords1, coords2):
+    lat1, lon1 = map(float, coords1.split(','))
+    lat2, lon2 = map(float, coords2.split(','))
+    R = 6371  # 지구 반지름 (km)
+    
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return R * c
+
+import math # math 모듈 임포트
 
 @st.cache_data(ttl=3600)
 def get_holidays_for_period(api_key, country_code, start_date, end_date):
@@ -153,7 +170,6 @@ def create_base_dataframe(weather_json, start_date, end_date):
     return df
 
 def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
-    """일별 점수 계산"""
     date_str = df.index.strftime('%Y-%m-%d')
     df['is_local_holiday'] = date_str.isin(local_holidays)
     df['is_kr_holiday'] = date_str.isin(kr_holidays)
@@ -173,13 +189,11 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
     df['total_score'] = df['score_weather'] + df['score_rain'] + df['score_busy'] + df['score_free']
     return df
 
-# --- 모드 1: 개인 맞춤형 (Top 3 추천) ---
+# --- 모드 1: 개인 맞춤형 (Single) ---
 def run_mode_single_trip():
-    st.header("🎯 모드 1: 개인 맞춤형 여행 추천")
+    st.header("🎯 개인 맞춤형 여행 추천")
     st.caption("가고 싶은 도시를 하나 골라, 최적의 여행 시기를 찾아보세요.")
 
-    # UI 개선: 도시 선택을 국가별로 그룹화하지 않고 검색 가능하게 유지
-    # (선택지가 많으므로 selectbox 검색 기능 활용)
     col1, col2 = st.columns(2)
     with col1:
         country_key = st.selectbox("어디로 떠날까요? (도시 검색)", options=CITY_DATA.keys())
@@ -193,7 +207,7 @@ def run_mode_single_trip():
     )
 
     today = datetime.now().date()
-    st.write("📅 **언제쯤 여행을 떠나시나요?**")
+    st.write("📅 **언제 여행을 떠나시나요?**")
     date_range = st.date_input(
         "달력에서 기간 선택",
         value=(today + timedelta(days=30), today + timedelta(days=90)),
@@ -204,7 +218,7 @@ def run_mode_single_trip():
     
     trip_duration = st.slider("여행 기간 (박)", 3, 14, 5)
 
-    if st.button("최적 일정 Top 3 찾기", type="primary"):
+    if st.button("최적 일정 찾기", type="primary"):
         if len(date_range) < 2: 
             st.error("달력에서 시작일과 종료일을 모두 선택해주세요.")
             st.stop()
@@ -266,86 +280,130 @@ def run_mode_single_trip():
                     c1.metric("예상 기온", f"{temp_avg:.1f}°C")
                     c2.metric("예상 강수", f"{rain_sum:.1f}mm")
                     c3.metric("휴일 포함", f"{free_days}일")
-                    
                     if temp_avg > 28: st.caption("🥵 더운 날씨 대비 필요")
                     elif temp_avg < 5: st.caption("🥶 추운 날씨 대비 필요")
                     elif 15 <= temp_avg <= 25: st.caption("🌿 여행하기 최적의 날씨!")
 
-# --- 모드 2: 다구간/장기 여행 (국가별 추천 기능 추가) ---
-def run_mode_multi_trip():
-    st.header("🌏 모드 2: 다구간 효율적 일정 짜기")
-    st.caption("가고 싶은 나라를 고르면, 그 나라의 추천 도시들을 자동으로 불러옵니다.")
+# --- 모드 2: 장기 여행 (루트 최적화) ---
+def run_mode_long_trip():
+    st.header("🌏 장기 여행 (루트 최적화)")
+    st.caption("여러 도시를 효율적으로 방문하는 순서(루트)를 제안합니다.")
 
-    # 1. 나라 선택 (중복 제거)
+    # 1. 나라 선택
     unique_countries = sorted(list(set([v['country'] for v in CITY_DATA.values()])))
-    selected_nations = st.multiselect("어느 나라로 가시나요? (여러 개 선택 가능)", unique_countries)
+    selected_nations = st.multiselect("방문할 나라들을 선택하세요", unique_countries)
 
-    # 2. 선택된 나라의 도시 자동 필터링
+    # 2. 도시 자동 필터링 및 선택
     available_cities = []
     if selected_nations:
         available_cities = [k for k, v in CITY_DATA.items() if v['country'] in selected_nations]
     
-    # 3. 도시 최종 선택
     selected_cities = st.multiselect(
-        "방문할 도시를 확인해주세요 (자동 선택됨)",
+        "방문할 도시를 확인 및 선택해주세요",
         options=available_cities,
         default=available_cities
     )
 
+    if not selected_cities:
+        st.info("나라를 먼저 선택해주세요.")
+        return
+
+    # [신규] 출발 도시 선택
+    start_city = st.selectbox("어디서 여행을 시작하시나요?", options=selected_cities)
+
     col1, col2 = st.columns(2)
     with col1:
-        start_date = st.date_input("여행 시작 가능일", value=datetime.now().date() + timedelta(days=30), min_value=datetime.now().date())
+        start_date = st.date_input("여행 시작일", value=datetime.now().date() + timedelta(days=30))
     with col2:
-        total_months = st.slider("전체 여행 가능 기간 (개월)", 1, 6, 3)
-
-    end_date = start_date + pd.DateOffset(months=total_months)
+        # [변경] 개월 -> 주 단위로 변경
+        total_weeks = st.slider("전체 여행 기간 (주)", 1, 12, 4)
     
-    if st.button("도시별 최적 시기 비교하기", type="primary"):
-        if len(selected_cities) < 1:
-            st.warning("분석할 도시가 없습니다. 나라를 먼저 선택해주세요."); st.stop()
-            
-        comparison_data = []
-        progress_bar = st.progress(0)
-        
-        hist_start = start_date - pd.DateOffset(years=1)
-        hist_end = end_date - pd.DateOffset(years=1)
-        
-        for idx, city_key in enumerate(selected_cities):
-            data = CITY_DATA[city_key]
-            lat, lon = data["coords"].split(',')
-            weather = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
-            df = create_base_dataframe(weather, hist_start, hist_end)
-            
-            if not df.empty:
-                df['score'] = (10 - abs(df['temperature_2m_max'] - 23)) - (df['precipitation_sum'] * 0.5)
-                df['smooth_score'] = df['score'].rolling(window=7).mean()
-                
-                for date, row in df.iterrows():
-                    current_date = date + pd.DateOffset(years=1)
-                    if not pd.isna(row['smooth_score']):
-                        # 그래프에 도시 이름만 깔끔하게 표시 (괄호 안 내용 추출)
-                        simple_name = data['city']
-                        comparison_data.append({
-                            "날짜": current_date,
-                            "도시": f"{simple_name} ({data['country']})",
-                            "여행 적합도": row['smooth_score']
-                        })
-            progress_bar.progress((idx + 1) / len(selected_cities))
+    total_days = total_weeks * 7
 
-        if comparison_data:
-            st.divider()
-            chart_df = pd.DataFrame(comparison_data)
-            st.line_chart(chart_df, x="날짜", y="여행 적합도", color="도시", height=400)
+    if st.button("효율적인 여행 루트 짜기", type="primary"):
+        if len(selected_cities) < 2:
+            st.warning("2개 이상의 도시를 선택해주세요."); st.stop()
+
+        # --- 루트 최적화 (Greedy: Nearest Neighbor) ---
+        route = [start_city]
+        unvisited = [c for c in selected_cities if c != start_city]
+        current_city = start_city
+
+        while unvisited:
+            # 현재 도시에서 가장 가까운 도시 찾기
+            curr_coords = CITY_DATA[current_city]["coords"]
             
-            st.subheader("💡 AI의 이동 순서 조언")
-            best_days = chart_df.loc[chart_df.groupby("도시")["여행 적합도"].idxmax()].sort_values("날짜")
+            # 거리 계산 및 정렬 lambda (x: 도시명)
+            nearest_city = min(unvisited, key=lambda x: calculate_distance(curr_coords, CITY_DATA[x]["coords"]))
             
-            st.write("날씨 데이터를 분석한 결과, 다음 순서로 이동하는 것을 추천합니다:")
-            for _, row in best_days.iterrows():
-                date_str = row['날짜'].strftime('%Y년 %m월')
-                st.markdown(f"- **{row['도시']}**: {date_str} 경에 방문 추천")
-        else:
-            st.error("데이터 부족")
+            route.append(nearest_city)
+            unvisited.remove(nearest_city)
+            current_city = nearest_city
+
+        # --- 일정 배분 및 날씨 체크 ---
+        days_per_city = max(2, total_days // len(route)) # 도시당 최소 2일 보장 노력
+        
+        st.divider()
+        st.subheader(f"🗺️ 추천 여행 루트 ({len(route)}개 도시, 총 {total_weeks}주)")
+        st.write("지리적 거리와 효율성을 고려하여 다음 순서를 추천합니다:")
+
+        # 루트 시각화 (간단한 화살표)
+        route_str = "  ➡️  ".join([f"**{city.split('(')[0].strip()}**" for city in route])
+        st.info(route_str)
+
+        st.subheader("📅 도시별 상세 일정 및 날씨 예보")
+        
+        current_date = start_date
+        
+        for idx, city in enumerate(route):
+            city_data = CITY_DATA[city]
+            lat, lon = city_data["coords"].split(',')
+            
+            # 마지막 도시는 남은 기간 전부 소진
+            if idx == len(route) - 1:
+                stay_days = (start_date + timedelta(days=total_days) - current_date).days
+            else:
+                stay_days = days_per_city
+            
+            arrival_date = current_date
+            departure_date = current_date + timedelta(days=stay_days)
+            
+            # 작년 날씨 확인
+            hist_start = arrival_date - pd.DateOffset(years=1)
+            hist_end = departure_date - pd.DateOffset(years=1)
+            
+            with st.spinner(f"{city} 날씨 확인 중..."):
+                weather = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
+                df = create_base_dataframe(weather, hist_start, hist_end)
+            
+            weather_desc = "데이터 없음"
+            temp_avg = 0
+            if not df.empty:
+                temp_avg = df['temperature_2m_max'].mean()
+                rain_sum = df['precipitation_sum'].sum()
+                
+                if temp_avg > 28: weather_status = "🥵 더움"
+                elif temp_avg < 5: weather_status = "🥶 추움"
+                elif 15 <= temp_avg <= 25: weather_status = "🌿 쾌적"
+                else: weather_status = "😐 보통"
+                
+                if rain_sum > 30: weather_status += ", ☔ 비 많음"
+                weather_desc = f"평균 {temp_avg:.1f}°C ({weather_status})"
+
+            # 카드 형태로 일정 출력
+            with st.container():
+                st.markdown(f"### {idx+1}. {city}")
+                c1, c2, c3 = st.columns([2, 2, 1])
+                c1.write(f"🗓️ **일정:** {arrival_date.strftime('%Y-%m-%d')} ~ {departure_date.strftime('%m-%d')} ({stay_days}박)")
+                c2.write(f"🌦️ **예상 날씨:** {weather_desc}")
+                
+                # 구글 맵 링크
+                map_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+                c3.markdown(f"[📍 지도 보기]({map_link})")
+                
+                st.divider()
+
+            current_date = departure_date # 다음 도시 도착일 = 이번 도시 출발일
 
 # --- 메인 앱 실행 ---
 def main():
@@ -354,14 +412,14 @@ def main():
     
     with st.sidebar:
         st.title("✈️ 여행 비서 AI")
-        app_mode = st.radio("선택 메뉴", ["개인 맞춤형 (Single)", "다구간 효율 (Multi)"])
+        app_mode = st.radio("선택 메뉴", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)"])
         st.write("---")
         st.caption("Made with Streamlit")
 
     if app_mode == "개인 맞춤형 (Single)":
         run_mode_single_trip()
-    elif app_mode == "다구간 효율 (Multi)":
-        run_mode_multi_trip()
+    elif app_mode == "장기 여행 (Long-term)": # 이름 변경 반영
+        run_mode_long_trip()
 
 if __name__ == "__main__":
     main()
