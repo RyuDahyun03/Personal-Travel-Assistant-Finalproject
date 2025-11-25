@@ -235,13 +235,9 @@ def draw_route_map(route_cities):
         })
         
     line_layer = pdk.Layer(
-        "LineLayer",
-        data=line_data,
-        get_source_position="start_coords",
-        get_target_position="end_coords",
-        get_color=[80, 80, 80, 200], # 진회색
-        get_width=3,
-        pickable=False
+        "LineLayer", data=line_data,
+        get_source_position="start_coords", get_target_position="end_coords",
+        get_color=[80, 80, 80, 200], get_width=3, pickable=False
     )
 
     first_coords = [route_cities[0]['lon'], route_cities[0]['lat']]
@@ -407,9 +403,7 @@ def run_mode_long_trip():
 
     if st.session_state['selected_cities_data']:
         st.write("### 📋 선택 목록")
-        # [오류 수정] selected_cities_data 사용 (타이포 수정됨)
-        for i, c in enumerate(st.session_state['selected_cities_data']):
-            st.text(f"{i+1}. {c['name']}")
+        for i, c in enumerate(st.session_state['selected_cities_data']): st.text(f"{i+1}. {c['name']}")
         if st.button("초기화 🗑️"): st.session_state['selected_cities_data'] = []; st.rerun()
     else: st.info("도시를 추가해주세요."); return
 
@@ -439,8 +433,7 @@ def run_mode_long_trip():
             unvisited.remove(nearest)
             curr = nearest
 
-        total_days = total_weeks * 7
-        days_per = max(2, total_days // len(route))
+        days_per_city = max(2, total_days // len(route))
         
         st.divider()
         st.subheader(f"🗺️ 추천 루트 ({len(route)}도시)")
@@ -455,7 +448,7 @@ def run_mode_long_trip():
         pdf_lines = ["=== 세계일주 루트 ===", ""]
         
         for idx, city in enumerate(route):
-            stay = (start_date + timedelta(total_days) - curr_date).days if idx == len(route)-1 else days_per
+            stay = (start_date + timedelta(total_days) - start_date).days if idx == len(route)-1 else days_per_city
             arrival, departure = curr_date, curr_date + timedelta(stay)
             
             h_start, h_end = arrival - pd.DateOffset(years=1), departure - pd.DateOffset(years=1)
@@ -483,7 +476,7 @@ def run_mode_long_trip():
         pdf_bytes = create_pdf_report(f"Long Trip Plan ({total_weeks} Weeks)", pdf_lines)
         st.download_button("📥 PDF 다운로드", data=pdf_bytes, file_name="LongTrip.pdf", mime="application/pdf")
 
-# --- 모드 3: AI 챗봇 ---
+# --- 모드 3: AI 챗봇 (최종: 다중 모델 + Fallback) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     if not GEMINI_KEY: st.error("API 키 없음"); return
@@ -494,12 +487,21 @@ def run_mode_chat():
         st.chat_message("user").markdown(prompt)
         with st.chat_message("assistant"):
             with st.spinner("생각 중..."):
-                # 자동 복구 로직
-                candidates = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-pro"]
+                # [수정] 모델 리스트 확장 (사용자 피드백 반영)
+                candidates = [
+                    "gemini-2.0-flash-exp", # 실험적 모델 (보통 최신 기능 포함)
+                    "gemini-2.0-flash",
+                    "gemini-2.5-flash",
+                    "gemini-1.5-flash",
+                    "gemini-pro"
+                ]
+
                 success = False
+                last_error = ""
                 current_date = datetime.now().strftime("%Y-%m-%d")
-                
+
                 for model_name in candidates:
+                    # 1차 시도: 구글 검색 포함
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
                         headers = {'Content-Type': 'application/json'}
@@ -507,16 +509,42 @@ def run_mode_chat():
                             "contents": [{"parts": [{"text": f"System: Today is {current_date}. Use google search for latest info.\nUser: {prompt}"}]}],
                             "tools": [{"google_search_retrieval": {}}]
                         }
-                        resp = requests.post(url, headers=headers, json=data)
-                        if resp.status_code == 200:
-                            ai_msg = resp.json()['candidates'][0]['content']['parts'][0]['text']
+                        response = requests.post(url, headers=headers, json=data)
+
+                        # 성공 시
+                        if response.status_code == 200:
+                            ai_msg = response.json()['candidates'][0]['content']['parts'][0]['text']
                             st.markdown(ai_msg)
                             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                             success = True
                             break
-                    except: continue
+                        
+                        # 실패 시 분석
+                        # 404: 모델 없음 -> 다음 모델로
+                        if response.status_code == 404:
+                            last_error = f"{model_name}: 404 Not Found"
+                            continue 
+                        
+                        # 400 등 다른 에러: 도구 문제일 수 있음 -> 도구 빼고 재시도
+                        else:
+                            # 2차 시도: 검색 도구 제외
+                            del data['tools']
+                            response_retry = requests.post(url, headers=headers, json=data)
+                            if response_retry.status_code == 200:
+                                ai_msg = response_retry.json()['candidates'][0]['content']['parts'][0]['text']
+                                st.markdown(ai_msg + "\n\n(⚠️ 검색 기능 없이 답변했습니다.)")
+                                st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+                                success = True
+                                break
+                            else:
+                                last_error = f"{model_name}: {response_retry.status_code} - {response_retry.text}"
+                                continue
+
+                    except Exception as e:
+                        last_error = str(e)
+                        continue
                 
-                if not success: st.error("AI 연결 실패. 잠시 후 시도해주세요.")
+                if not success: st.error(f"AI 연결 실패. (오류: {last_error})")
 
 # --- 메인 실행 ---
 def main():
