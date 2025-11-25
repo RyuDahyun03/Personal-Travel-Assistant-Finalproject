@@ -9,7 +9,6 @@ import time
 
 # --- 1. 전 세계 주요 도시 데이터 ---
 CITY_DATA = {
-    # [동북아시아]
     "🇯🇵 일본 (도쿄)": {"code": "JP", "city": "Tokyo", "coords": "35.6895,139.6917", "country": "일본", "cost": 180000, "visa": "무비자 (90일)"},
     "🇯🇵 일본 (오사카)": {"code": "JP", "city": "Osaka", "coords": "34.6937,135.5023", "country": "일본", "cost": 160000, "visa": "무비자 (90일)"},
     "🇯🇵 일본 (후쿠오카)": {"code": "JP", "city": "Fukuoka", "coords": "33.5904,130.4017", "country": "일본", "cost": 140000, "visa": "무비자 (90일)"},
@@ -21,8 +20,6 @@ CITY_DATA = {
     "🇹🇼 대만 (타이베이)": {"code": "TW", "city": "Taipei", "coords": "25.0330,121.5654", "country": "대만", "cost": 110000, "visa": "무비자 (90일)"},
     "🇹🇼 대만 (가오슝)": {"code": "TW", "city": "Kaohsiung", "coords": "22.6273,120.3014", "country": "대만", "cost": 100000, "visa": "무비자 (90일)"},
     "🇭🇰 홍콩": {"code": "HK", "city": "Hong Kong", "coords": "22.3193,114.1694", "country": "홍콩", "cost": 190000, "visa": "무비자 (90일)"},
-
-    # [동남아시아]
     "🇻🇳 베트남 (하노이)": {"code": "VN", "city": "Hanoi", "coords": "21.0285,105.8542", "country": "베트남", "cost": 80000, "visa": "무비자 (45일)"},
     "🇻🇳 베트남 (다낭)": {"code": "VN", "city": "Da Nang", "coords": "16.0544,108.2022", "country": "베트남", "cost": 90000, "visa": "무비자 (45일)"},
     "🇻🇳 베트남 (호치민)": {"code": "VN", "city": "Ho Chi Minh", "coords": "10.8231,106.6297", "country": "베트남", "cost": 85000, "visa": "무비자 (45일)"},
@@ -33,8 +30,6 @@ CITY_DATA = {
     "🇸🇬 싱가포르": {"code": "SG", "city": "Singapore", "coords": "1.3521,103.8198", "country": "싱가포르", "cost": 220000, "visa": "무비자 (90일)"},
     "🇮🇩 인도네시아 (발리)": {"code": "ID", "city": "Bali", "coords": "-8.4095,115.1889", "country": "인도네시아", "cost": 110000, "visa": "도착비자 필요 (약 4만원)"},
     "🇵🇭 필리핀 (세부)": {"code": "PH", "city": "Cebu", "coords": "10.3157,123.8854", "country": "필리핀", "cost": 90000, "visa": "무비자 (30일)"},
-
-    # [유럽 - 서유럽]
     "🇬🇧 영국 (런던)": {"code": "GB", "city": "London", "coords": "51.5074,-0.1278", "country": "영국", "cost": 280000, "visa": "무비자 (6개월)"},
     "🇬🇧 영국 (에든버러)": {"code": "GB", "city": "Edinburgh", "coords": "55.9533,-3.1883", "country": "영국", "cost": 260000, "visa": "무비자 (6개월)"},
     "🇮🇪 아일랜드 (더블린)": {"code": "IE", "city": "Dublin", "coords": "53.3498,-6.2603", "country": "아일랜드", "cost": 250000, "visa": "무비자 (90일)"},
@@ -49,8 +44,6 @@ CITY_DATA = {
     "🇫🇷 프랑스 (콜마르)": {"code": "FR", "city": "Colmar", "coords": "48.0794,7.3585", "country": "프랑스", "cost": 170000, "visa": "무비자 (90일)"},
     "🇧🇪 벨기에 (브뤼셀)": {"code": "BE", "city": "Brussels", "coords": "50.8503,4.3517", "country": "벨기에", "cost": 210000, "visa": "무비자 (90일)"},
     "🇳🇱 네덜란드 (암스테르담)": {"code": "NL", "city": "Amsterdam", "coords": "52.3676,4.9041", "country": "네덜란드", "cost": 230000, "visa": "무비자 (90일)"},
-
-    # [유럽 - 남유럽]
     "🇮🇹 이탈리아 (로마)": {"code": "IT", "city": "Rome", "coords": "41.9028,12.4964", "country": "이탈리아", "cost": 220000, "visa": "무비자 (90일)"},
     "🇮🇹 이탈리아 (피렌체)": {"code": "IT", "city": "Florence", "coords": "43.7696,11.2558", "country": "이탈리아", "cost": 230000, "visa": "무비자 (90일)"},
     "🇮🇹 이탈리아 (베네치아)": {"code": "IT", "city": "Venice", "coords": "45.4408,12.3155", "country": "이탈리아", "cost": 240000, "visa": "무비자 (90일)"},
@@ -62,8 +55,6 @@ CITY_DATA = {
     "🇬🇷 그리스 (아테네)": {"code": "GR", "city": "Athens", "coords": "37.9838,23.7275", "country": "그리스", "cost": 170000, "visa": "무비자 (90일)"},
     "🇬🇷 그리스 (산토리니)": {"code": "GR", "city": "Santorini", "coords": "36.3932,25.4615", "country": "그리스", "cost": 250000, "visa": "무비자 (90일)"},
     "🇹🇷 튀르키예 (이스탄불)": {"code": "TR", "city": "Istanbul", "coords": "41.0082,28.9784", "country": "튀르키예", "cost": 130000, "visa": "무비자 (90일)"},
-
-    # [유럽 - 중부/동부]
     "🇨🇭 스위스 (취리히)": {"code": "CH", "city": "Zurich", "coords": "47.3769,8.5417", "country": "스위스", "cost": 350000, "visa": "무비자 (90일)"},
     "🇨🇭 스위스 (인터라켄)": {"code": "CH", "city": "Interlaken", "coords": "46.6863,7.8632", "country": "스위스", "cost": 330000, "visa": "무비자 (90일)"},
     "🇩🇪 독일 (베를린)": {"code": "DE", "city": "Berlin", "coords": "52.5200,13.4050", "country": "독일", "cost": 190000, "visa": "무비자 (90일)"},
@@ -74,13 +65,9 @@ CITY_DATA = {
     "🇭🇺 헝가리 (부다페스트)": {"code": "HU", "city": "Budapest", "coords": "47.4979,19.0402", "country": "헝가리", "cost": 110000, "visa": "무비자 (90일)"},
     "🇭🇷 크로아티아 (두브로브니크)": {"code": "HR", "city": "Dubrovnik", "coords": "42.6507,18.0944", "country": "크로아티아", "cost": 180000, "visa": "무비자 (90일)"},
     "🇭🇷 크로아티아 (자그레브)": {"code": "HR", "city": "Zagreb", "coords": "45.8150,15.9819", "country": "크로아티아", "cost": 130000, "visa": "무비자 (90일)"},
-
-    # [유럽 - 북유럽]
     "🇩🇰 덴마크 (코펜하겐)": {"code": "DK", "city": "Copenhagen", "coords": "55.6761,12.5683", "country": "덴마크", "cost": 260000, "visa": "무비자 (90일)"},
     "🇸🇪 스웨덴 (스톡홀름)": {"code": "SE", "city": "Stockholm", "coords": "59.3293,18.0686", "country": "스웨덴", "cost": 240000, "visa": "무비자 (90일)"},
     "🇳🇴 노르웨이 (오슬로)": {"code": "NO", "city": "Oslo", "coords": "59.9139,10.7522", "country": "노르웨이", "cost": 270000, "visa": "무비자 (90일)"},
-
-    # [미주]
     "🇺🇸 미국 (뉴욕)": {"code": "US", "city": "New York", "coords": "40.7128,-74.0060", "country": "미국", "cost": 350000, "visa": "ESTA 필요"},
     "🇺🇸 미국 (LA)": {"code": "US", "city": "Los Angeles", "coords": "34.0522,-118.2437", "country": "미국", "cost": 300000, "visa": "ESTA 필요"},
     "🇺🇸 미국 (샌프란시스코)": {"code": "US", "city": "San Francisco", "coords": "37.7749,-122.4194", "country": "미국", "cost": 320000, "visa": "ESTA 필요"},
@@ -89,8 +76,6 @@ CITY_DATA = {
     "🇨🇦 캐나다 (밴쿠버)": {"code": "CA", "city": "Vancouver", "coords": "49.2827,-123.1207", "country": "캐나다", "cost": 250000, "visa": "eTA 필요"},
     "🇨🇦 캐나다 (토론토)": {"code": "CA", "city": "Toronto", "coords": "43.6510,-79.3470", "country": "캐나다", "cost": 240000, "visa": "eTA 필요"},
     "🇲🇽 멕시코 (칸쿤)": {"code": "MX", "city": "Cancun", "coords": "21.1619,-86.8515", "country": "멕시코", "cost": 180000, "visa": "무비자 (180일)"},
-
-    # [오세아니아/기타]
     "🇦🇺 호주 (시드니)": {"code": "AU", "city": "Sydney", "coords": "-33.8688,151.2093", "country": "호주", "cost": 230000, "visa": "ETA 필요"},
     "🇦🇺 호주 (멜버른)": {"code": "AU", "city": "Melbourne", "coords": "-37.8136,144.9631", "country": "호주", "cost": 220000, "visa": "ETA 필요"},
     "🇬🇺 괌": {"code": "GU", "city": "Guam", "coords": "13.4443,144.7937", "country": "괌", "cost": 250000, "visa": "무비자 (45일)"},
@@ -207,6 +192,7 @@ def draw_route_map(route_cities):
     map_data = []
     for i, city_key in enumerate(route_cities):
         city_data = CITY_DATA[city_key]
+        # PyDeck은 [경도, 위도] 순서
         coords = list(map(float, city_data['coords'].split(',')))[::-1]
         map_data.append({
             "coordinates": coords,
@@ -214,17 +200,20 @@ def draw_route_map(route_cities):
             "size": 50000, "color": [0, 200, 100, 200]
         })
     
+    # 1. 점 레이어
     scatter_layer = pdk.Layer(
         "ScatterplotLayer", data=map_data, get_position="coordinates",
         get_fill_color="color", get_radius="size", pickable=True,
         radius_scale=1, radius_min_pixels=10, radius_max_pixels=30
     )
+    # 2. 텍스트 레이어
     text_layer = pdk.Layer(
         "TextLayer", data=map_data, get_position="coordinates",
         get_text="name", get_size=20, get_color=[0, 0, 0],
         get_angle=0, get_text_anchor="middle", get_alignment_baseline="bottom",
         pixel_offset=[0, -20]
     )
+    # 초기 뷰 설정
     first_coords = list(map(float, CITY_DATA[route_cities[0]]['coords'].split(',')))[::-1]
     view_state = pdk.ViewState(latitude=first_coords[1], longitude=first_coords[0], zoom=3)
     
@@ -287,10 +276,12 @@ def run_mode_single_trip():
     
     col1, col2 = st.columns(2)
     with col1:
+        # [신규] 검색 기능 활성화된 selectbox
         country_key = st.selectbox("어디로 떠날까요? (도시 검색)", options=CITY_DATA.keys())
     with col2:
         theme_name = st.selectbox("여행 테마", options=THEME_OSM_MAP.keys())
 
+    # [신규] 라디오 버튼 스타일
     travel_style = st.radio("여행 스타일 (경비용)", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], index=1, horizontal=True)
     priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
@@ -371,6 +362,7 @@ def run_mode_single_trip():
 def run_mode_long_trip():
     st.header("🌏 모드 2: 장기 여행 (루트 최적화)")
     
+    # [신규] 나라 선택으로 필터링
     countries = sorted(list(set([v['country'] for v in CITY_DATA.values()])))
     selected_nations = st.multiselect("나라 선택", countries)
     
@@ -411,8 +403,10 @@ def run_mode_long_trip():
         visa_list = set()
         dl_text = "[[ 장기 여행 ]]\n"
         
+        # 총 비용 계산
         for i, city in enumerate(route):
             stay = (start_date + timedelta(total_days) - start_date).days if i == len(route)-1 else days_per_city # 단순화
+            # 실제 날짜별 비용 계산은 복잡하므로 단순 합산
             total_cost += calculate_travel_cost(city, days_per_city, travel_style)
             visa_list.add(f"{CITY_DATA[city]['country']}: {CITY_DATA[city]['visa']}")
 
@@ -454,7 +448,7 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (최종: 2.0-flash 모델 우선 적용) ---
+# --- 모드 3: AI 챗봇 (동적 모델 감지) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
@@ -476,29 +470,49 @@ def run_mode_chat():
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
                 current_date = datetime.now().strftime("%Y년 %m월 %d일")
-                system_instruction = f"오늘은 {current_date}입니다. 미래 시점 질문 시 검색 도구를 활용해 최신 정보나 과거 데이터를 찾아 답변하세요."
-
-                # [최종 수정] 사용자 계정에서 사용 가능한 최신 모델 목록 (2.0 우선)
-                candidates = [
-                    "gemini-2.0-flash", 
-                    "gemini-2.5-flash",
-                    "gemini-2.0-flash-lite-preview",
-                    "gemini-1.5-flash"
-                ]
                 
+                # 1. 동적 모델 조회 (사용자 계정에서 사용 가능한 모델 찾기)
+                available_models = []
+                try:
+                    list_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
+                    resp = requests.get(list_url)
+                    if resp.status_code == 200:
+                        models = resp.json().get('models', [])
+                        # generateContent를 지원하는 모델만 필터링
+                        available_models = [m['name'].split('/')[-1] for m in models if 'generateContent' in m['supportedGenerationMethods']]
+                except: pass
+
+                # 2. 우선순위 설정 (최신 모델 -> 구형 모델)
+                preferred_order = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-pro"]
+                
+                # 사용 가능한 모델과 우선순위 매칭
+                candidates = [m for m in preferred_order if m in available_models]
+                if not candidates: # 매칭되는게 없으면 그냥 우선순위 리스트 사용 (혹시 모를 경우 대비)
+                    candidates = preferred_order
+
                 success = False
                 last_error = ""
                 
+                # 3. 모델 순차 시도
                 for model_name in candidates:
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
                         headers = {'Content-Type': 'application/json'}
-                        data = {
-                            "contents": [{"parts": [{"text": f"{system_instruction}\nUser: {prompt}"}]}],
-                            "tools": [{"googleSearchRetrieval": {}}]
-                        }
-                        response = requests.post(url, headers=headers, json=data)
                         
+                        # [수정] 검색 도구 호환성 문제 방지를 위해 'google_search' (snake_case) 사용 시도
+                        # 만약 검색 도구가 400 오류를 일으키면, 검색 없이 재시도하는 로직 추가
+                        payload = {
+                            "contents": [{"parts": [{"text": f"System: 오늘은 {current_date}입니다. 미래 질문 시 최신 정보 검색.\nUser: {prompt}"}]}],
+                            "tools": [{"google_search_retrieval": {}}] # 검색 활성화
+                        }
+                        
+                        response = requests.post(url, headers=headers, json=payload)
+                        
+                        # 검색 도구 오류(400) 시 검색 없이 재시도 (Fallback)
+                        if response.status_code == 400: 
+                             del payload['tools']
+                             response = requests.post(url, headers=headers, json=payload)
+
                         if response.status_code == 200:
                             ai_msg = response.json()['candidates'][0]['content']['parts'][0]['text']
                             st.markdown(ai_msg)
@@ -513,7 +527,7 @@ def run_mode_chat():
                         continue
                 
                 if not success:
-                    st.error(f"모든 모델 연결 실패 😢 (마지막 오류: {last_error})")
+                    st.error(f"응답 실패 (오류: {last_error})")
                     st.info("잠시 후 다시 시도해주세요.")
 
 # --- 메인 실행 ---
