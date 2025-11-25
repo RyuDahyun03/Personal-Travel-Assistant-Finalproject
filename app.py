@@ -454,7 +454,7 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (자동 복구 + 날짜 인식 + 검색 기능) ---
+# --- 모드 3: AI 챗봇 (최종: 2.0-flash 모델 우선 적용) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
@@ -475,16 +475,15 @@ def run_mode_chat():
 
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
-                # [핵심] 오늘 날짜 정보 주입
                 current_date = datetime.now().strftime("%Y년 %m월 %d일")
                 system_instruction = f"오늘은 {current_date}입니다. 미래 시점 질문 시 검색 도구를 활용해 최신 정보나 과거 데이터를 찾아 답변하세요."
 
-                # [수정] 모델 리스트 최적화: 사용자 계정에 활성화된 최신 모델(2.0)부터 시도
+                # [최종 수정] 사용자 계정에서 사용 가능한 최신 모델 목록 (2.0 우선)
                 candidates = [
-                    "gemini-2.0-flash", # 1순위
-                    "gemini-2.5-flash", # 2순위
-                    "gemini-1.5-flash", # 3순위
-                    "gemini-pro"        # 4순위
+                    "gemini-2.0-flash", 
+                    "gemini-2.5-flash",
+                    "gemini-2.0-flash-lite-preview",
+                    "gemini-1.5-flash"
                 ]
                 
                 success = False
