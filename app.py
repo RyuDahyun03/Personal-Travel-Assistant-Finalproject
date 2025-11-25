@@ -3,66 +3,69 @@ import requests
 import pandas as pd
 import math
 from datetime import datetime, timedelta
+import io
 
-# --- 1. 전 세계 주요 도시 데이터 ---
+# --- 1. 전 세계 주요 도시 데이터 (경비/비자 정보 추가) ---
+# 비용: 1인 1일 기준 (숙박+식비+교통) - 일반 여행객 기준 (KRW)
+# 비자: 한국 여권 소지자 기준
 CITY_DATA = {
     # [동북아시아]
-    "🇯🇵 일본 (도쿄)": {"code": "JP", "city": "Tokyo", "coords": "35.6895,139.6917", "country": "일본"},
-    "🇯🇵 일본 (오사카)": {"code": "JP", "city": "Osaka", "coords": "34.6937,135.5023", "country": "일본"},
-    "🇯🇵 일본 (후쿠오카)": {"code": "JP", "city": "Fukuoka", "coords": "33.5904,130.4017", "country": "일본"},
-    "🇯🇵 일본 (삿포로)": {"code": "JP", "city": "Sapporo", "coords": "43.0618,141.3545", "country": "일본"},
-    "🇯🇵 일본 (오키나와)": {"code": "JP", "city": "Naha", "coords": "26.2124,127.6809", "country": "일본"},
-    "🇰🇷 한국 (서울)": {"code": "KR", "city": "Seoul", "coords": "37.5665,126.9780", "country": "한국"},
-    "🇰🇷 한국 (부산)": {"code": "KR", "city": "Busan", "coords": "35.1796,129.0756", "country": "한국"},
-    "🇰🇷 한국 (제주)": {"code": "KR", "city": "Jeju", "coords": "33.4996,126.5312", "country": "한국"},
-    "🇹🇼 대만 (타이베이)": {"code": "TW", "city": "Taipei", "coords": "25.0330,121.5654", "country": "대만"},
-    "🇹🇼 대만 (가오슝)": {"code": "TW", "city": "Kaohsiung", "coords": "22.6273,120.3014", "country": "대만"},
-    "🇭🇰 홍콩": {"code": "HK", "city": "Hong Kong", "coords": "22.3193,114.1694", "country": "홍콩"},
+    "🇯🇵 일본 (도쿄)": {"code": "JP", "city": "Tokyo", "coords": "35.6895,139.6917", "country": "일본", "cost": 180000, "visa": "무비자 (90일)"},
+    "🇯🇵 일본 (오사카)": {"code": "JP", "city": "Osaka", "coords": "34.6937,135.5023", "country": "일본", "cost": 160000, "visa": "무비자 (90일)"},
+    "🇯🇵 일본 (후쿠오카)": {"code": "JP", "city": "Fukuoka", "coords": "33.5904,130.4017", "country": "일본", "cost": 140000, "visa": "무비자 (90일)"},
+    "🇯🇵 일본 (삿포로)": {"code": "JP", "city": "Sapporo", "coords": "43.0618,141.3545", "country": "일본", "cost": 170000, "visa": "무비자 (90일)"},
+    "🇯🇵 일본 (오키나와)": {"code": "JP", "city": "Naha", "coords": "26.2124,127.6809", "country": "일본", "cost": 160000, "visa": "무비자 (90일)"},
+    "🇰🇷 한국 (서울)": {"code": "KR", "city": "Seoul", "coords": "37.5665,126.9780", "country": "한국", "cost": 130000, "visa": "해당 없음"},
+    "🇰🇷 한국 (부산)": {"code": "KR", "city": "Busan", "coords": "35.1796,129.0756", "country": "한국", "cost": 120000, "visa": "해당 없음"},
+    "🇰🇷 한국 (제주)": {"code": "KR", "city": "Jeju", "coords": "33.4996,126.5312", "country": "한국", "cost": 140000, "visa": "해당 없음"},
+    "🇹🇼 대만 (타이베이)": {"code": "TW", "city": "Taipei", "coords": "25.0330,121.5654", "country": "대만", "cost": 110000, "visa": "무비자 (90일)"},
+    "🇹🇼 대만 (가오슝)": {"code": "TW", "city": "Kaohsiung", "coords": "22.6273,120.3014", "country": "대만", "cost": 100000, "visa": "무비자 (90일)"},
+    "🇭🇰 홍콩": {"code": "HK", "city": "Hong Kong", "coords": "22.3193,114.1694", "country": "홍콩", "cost": 190000, "visa": "무비자 (90일)"},
 
     # [동남아시아]
-    "🇻🇳 베트남 (하노이)": {"code": "VN", "city": "Hanoi", "coords": "21.0285,105.8542", "country": "베트남"},
-    "🇻🇳 베트남 (다낭)": {"code": "VN", "city": "Da Nang", "coords": "16.0544,108.2022", "country": "베트남"},
-    "🇻🇳 베트남 (호치민)": {"code": "VN", "city": "Ho Chi Minh", "coords": "10.8231,106.6297", "country": "베트남"},
-    "🇻🇳 베트남 (나트랑)": {"code": "VN", "city": "Nha Trang", "coords": "12.2388,109.1967", "country": "베트남"},
-    "🇹🇭 태국 (방콕)": {"code": "TH", "city": "Bangkok", "coords": "13.7563,100.5018", "country": "태국"},
-    "🇹🇭 태국 (치앙마이)": {"code": "TH", "city": "Chiang Mai", "coords": "18.7061,98.9817", "country": "태국"},
-    "🇹🇭 태국 (푸켓)": {"code": "TH", "city": "Phuket", "coords": "7.8804,98.3923", "country": "태국"},
-    "🇸🇬 싱가포르": {"code": "SG", "city": "Singapore", "coords": "1.3521,103.8198", "country": "싱가포르"},
-    "🇮🇩 인도네시아 (발리)": {"code": "ID", "city": "Bali", "coords": "-8.4095,115.1889", "country": "인도네시아"},
-    "🇵🇭 필리핀 (세부)": {"code": "PH", "city": "Cebu", "coords": "10.3157,123.8854", "country": "필리핀"},
+    "🇻🇳 베트남 (하노이)": {"code": "VN", "city": "Hanoi", "coords": "21.0285,105.8542", "country": "베트남", "cost": 80000, "visa": "무비자 (45일)"},
+    "🇻🇳 베트남 (다낭)": {"code": "VN", "city": "Da Nang", "coords": "16.0544,108.2022", "country": "베트남", "cost": 90000, "visa": "무비자 (45일)"},
+    "🇻🇳 베트남 (호치민)": {"code": "VN", "city": "Ho Chi Minh", "coords": "10.8231,106.6297", "country": "베트남", "cost": 85000, "visa": "무비자 (45일)"},
+    "🇻🇳 베트남 (나트랑)": {"code": "VN", "city": "Nha Trang", "coords": "12.2388,109.1967", "country": "베트남", "cost": 85000, "visa": "무비자 (45일)"},
+    "🇹🇭 태국 (방콕)": {"code": "TH", "city": "Bangkok", "coords": "13.7563,100.5018", "country": "태국", "cost": 100000, "visa": "무비자 (90일)"},
+    "🇹🇭 태국 (치앙마이)": {"code": "TH", "city": "Chiang Mai", "coords": "18.7061,98.9817", "country": "태국", "cost": 70000, "visa": "무비자 (90일)"},
+    "🇹🇭 태국 (푸켓)": {"code": "TH", "city": "Phuket", "coords": "7.8804,98.3923", "country": "태국", "cost": 120000, "visa": "무비자 (90일)"},
+    "🇸🇬 싱가포르": {"code": "SG", "city": "Singapore", "coords": "1.3521,103.8198", "country": "싱가포르", "cost": 220000, "visa": "무비자 (90일)"},
+    "🇮🇩 인도네시아 (발리)": {"code": "ID", "city": "Bali", "coords": "-8.4095,115.1889", "country": "인도네시아", "cost": 110000, "visa": "도착비자 필요 (약 4만원)"},
+    "🇵🇭 필리핀 (세부)": {"code": "PH", "city": "Cebu", "coords": "10.3157,123.8854", "country": "필리핀", "cost": 90000, "visa": "무비자 (30일)"},
 
     # [유럽]
-    "🇬🇧 영국 (런던)": {"code": "GB", "city": "London", "coords": "51.5074,-0.1278", "country": "영국"},
-    "🇫🇷 프랑스 (파리)": {"code": "FR", "city": "Paris", "coords": "48.8566,2.3522", "country": "프랑스"},
-    "🇫🇷 프랑스 (니스)": {"code": "FR", "city": "Nice", "coords": "43.7102,7.2620", "country": "프랑스"},
-    "🇮🇹 이탈리아 (로마)": {"code": "IT", "city": "Rome", "coords": "41.9028,12.4964", "country": "이탈리아"},
-    "🇮🇹 이탈리아 (피렌체)": {"code": "IT", "city": "Florence", "coords": "43.7696,11.2558", "country": "이탈리아"},
-    "🇮🇹 이탈리아 (베네치아)": {"code": "IT", "city": "Venice", "coords": "45.4408,12.3155", "country": "이탈리아"},
-    "🇪🇸 스페인 (바르셀로나)": {"code": "ES", "city": "Barcelona", "coords": "41.3851,2.1734", "country": "스페인"},
-    "🇪🇸 스페인 (마드리드)": {"code": "ES", "city": "Madrid", "coords": "40.4168,-3.7038", "country": "스페인"},
-    "🇨🇭 스위스 (취리히)": {"code": "CH", "city": "Zurich", "coords": "47.3769,8.5417", "country": "스위스"},
-    "🇨🇭 스위스 (인터라켄)": {"code": "CH", "city": "Interlaken", "coords": "46.6863,7.8632", "country": "스위스"},
-    "🇨🇿 체코 (프라하)": {"code": "CZ", "city": "Prague", "coords": "50.0755,14.4378", "country": "체코"},
-    "🇦🇹 오스트리아 (빈)": {"code": "AT", "city": "Vienna", "coords": "48.2082,16.3738", "country": "오스트리아"},
-    "🇭🇺 헝가리 (부다페스트)": {"code": "HU", "city": "Budapest", "coords": "47.4979,19.0402", "country": "헝가리"},
-    "🇩🇪 독일 (베를린)": {"code": "DE", "city": "Berlin", "coords": "52.5200,13.4050", "country": "독일"},
-    "🇳🇱 네덜란드 (암스테르담)": {"code": "NL", "city": "Amsterdam", "coords": "52.3676,4.9041", "country": "네덜란드"},
+    "🇬🇧 영국 (런던)": {"code": "GB", "city": "London", "coords": "51.5074,-0.1278", "country": "영국", "cost": 280000, "visa": "무비자 (6개월)"},
+    "🇫🇷 프랑스 (파리)": {"code": "FR", "city": "Paris", "coords": "48.8566,2.3522", "country": "프랑스", "cost": 250000, "visa": "무비자 (90일)"},
+    "🇫🇷 프랑스 (니스)": {"code": "FR", "city": "Nice", "coords": "43.7102,7.2620", "country": "프랑스", "cost": 260000, "visa": "무비자 (90일)"},
+    "🇮🇹 이탈리아 (로마)": {"code": "IT", "city": "Rome", "coords": "41.9028,12.4964", "country": "이탈리아", "cost": 220000, "visa": "무비자 (90일)"},
+    "🇮🇹 이탈리아 (피렌체)": {"code": "IT", "city": "Florence", "coords": "43.7696,11.2558", "country": "이탈리아", "cost": 230000, "visa": "무비자 (90일)"},
+    "🇮🇹 이탈리아 (베네치아)": {"code": "IT", "city": "Venice", "coords": "45.4408,12.3155", "country": "이탈리아", "cost": 240000, "visa": "무비자 (90일)"},
+    "🇪🇸 스페인 (바르셀로나)": {"code": "ES", "city": "Barcelona", "coords": "41.3851,2.1734", "country": "스페인", "cost": 180000, "visa": "무비자 (90일)"},
+    "🇪🇸 스페인 (마드리드)": {"code": "ES", "city": "Madrid", "coords": "40.4168,-3.7038", "country": "스페인", "cost": 170000, "visa": "무비자 (90일)"},
+    "🇨🇭 스위스 (취리히)": {"code": "CH", "city": "Zurich", "coords": "47.3769,8.5417", "country": "스위스", "cost": 350000, "visa": "무비자 (90일)"},
+    "🇨🇭 스위스 (인터라켄)": {"code": "CH", "city": "Interlaken", "coords": "46.6863,7.8632", "country": "스위스", "cost": 330000, "visa": "무비자 (90일)"},
+    "🇨🇿 체코 (프라하)": {"code": "CZ", "city": "Prague", "coords": "50.0755,14.4378", "country": "체코", "cost": 120000, "visa": "무비자 (90일)"},
+    "🇦🇹 오스트리아 (빈)": {"code": "AT", "city": "Vienna", "coords": "48.2082,16.3738", "country": "오스트리아", "cost": 200000, "visa": "무비자 (90일)"},
+    "🇭🇺 헝가리 (부다페스트)": {"code": "HU", "city": "Budapest", "coords": "47.4979,19.0402", "country": "헝가리", "cost": 110000, "visa": "무비자 (90일)"},
+    "🇩🇪 독일 (베를린)": {"code": "DE", "city": "Berlin", "coords": "52.5200,13.4050", "country": "독일", "cost": 190000, "visa": "무비자 (90일)"},
+    "🇳🇱 네덜란드 (암스테르담)": {"code": "NL", "city": "Amsterdam", "coords": "52.3676,4.9041", "country": "네덜란드", "cost": 230000, "visa": "무비자 (90일)"},
 
     # [미주]
-    "🇺🇸 미국 (뉴욕)": {"code": "US", "city": "New York", "coords": "40.7128,-74.0060", "country": "미국"},
-    "🇺🇸 미국 (LA)": {"code": "US", "city": "Los Angeles", "coords": "34.0522,-118.2437", "country": "미국"},
-    "🇺🇸 미국 (샌프란시스코)": {"code": "US", "city": "San Francisco", "coords": "37.7749,-122.4194", "country": "미국"},
-    "🇺🇸 미국 (라스베이거스)": {"code": "US", "city": "Las Vegas", "coords": "36.1699,-115.1398", "country": "미국"},
-    "🇺🇸 미국 (하와이 호놀룰루)": {"code": "US", "city": "Honolulu", "coords": "21.3069,-157.8583", "country": "미국"},
-    "🇨🇦 캐나다 (밴쿠버)": {"code": "CA", "city": "Vancouver", "coords": "49.2827,-123.1207", "country": "캐나다"},
-    "🇨🇦 캐나다 (토론토)": {"code": "CA", "city": "Toronto", "coords": "43.6510,-79.3470", "country": "캐나다"},
-    "🇲🇽 멕시코 (칸쿤)": {"code": "MX", "city": "Cancun", "coords": "21.1619,-86.8515", "country": "멕시코"},
+    "🇺🇸 미국 (뉴욕)": {"code": "US", "city": "New York", "coords": "40.7128,-74.0060", "country": "미국", "cost": 350000, "visa": "ESTA 필요"},
+    "🇺🇸 미국 (LA)": {"code": "US", "city": "Los Angeles", "coords": "34.0522,-118.2437", "country": "미국", "cost": 300000, "visa": "ESTA 필요"},
+    "🇺🇸 미국 (샌프란시스코)": {"code": "US", "city": "San Francisco", "coords": "37.7749,-122.4194", "country": "미국", "cost": 320000, "visa": "ESTA 필요"},
+    "🇺🇸 미국 (라스베이거스)": {"code": "US", "city": "Las Vegas", "coords": "36.1699,-115.1398", "country": "미국", "cost": 280000, "visa": "ESTA 필요"},
+    "🇺🇸 미국 (하와이 호놀룰루)": {"code": "US", "city": "Honolulu", "coords": "21.3069,-157.8583", "country": "미국", "cost": 330000, "visa": "ESTA 필요"},
+    "🇨🇦 캐나다 (밴쿠버)": {"code": "CA", "city": "Vancouver", "coords": "49.2827,-123.1207", "country": "캐나다", "cost": 250000, "visa": "eTA 필요"},
+    "🇨🇦 캐나다 (토론토)": {"code": "CA", "city": "Toronto", "coords": "43.6510,-79.3470", "country": "캐나다", "cost": 240000, "visa": "eTA 필요"},
+    "🇲🇽 멕시코 (칸쿤)": {"code": "MX", "city": "Cancun", "coords": "21.1619,-86.8515", "country": "멕시코", "cost": 180000, "visa": "무비자 (180일)"},
 
     # [오세아니아/기타]
-    "🇦🇺 호주 (시드니)": {"code": "AU", "city": "Sydney", "coords": "-33.8688,151.2093", "country": "호주"},
-    "🇦🇺 호주 (멜버른)": {"code": "AU", "city": "Melbourne", "coords": "-37.8136,144.9631", "country": "호주"},
-    "🇬🇺 괌": {"code": "GU", "city": "Guam", "coords": "13.4443,144.7937", "country": "괌"},
-    "🇲🇵 사이판": {"code": "MP", "city": "Saipan", "coords": "15.1833,145.7500", "country": "사이판"}
+    "🇦🇺 호주 (시드니)": {"code": "AU", "city": "Sydney", "coords": "-33.8688,151.2093", "country": "호주", "cost": 230000, "visa": "ETA 필요"},
+    "🇦🇺 호주 (멜버른)": {"code": "AU", "city": "Melbourne", "coords": "-37.8136,144.9631", "country": "호주", "cost": 220000, "visa": "ETA 필요"},
+    "🇬🇺 괌": {"code": "GU", "city": "Guam", "coords": "13.4443,144.7937", "country": "괌", "cost": 250000, "visa": "무비자 (45일)"},
+    "🇲🇵 사이판": {"code": "MP", "city": "Saipan", "coords": "15.1833,145.7500", "country": "사이판", "cost": 240000, "visa": "무비자 (45일)"}
 }
 
 THEME_OSM_MAP = {
@@ -82,25 +85,19 @@ def check_api_keys():
 
 # --- 3. 공통 API 및 유틸리티 함수 ---
 
-# [신규] 거리 계산 함수 (Haversine formula)
 def calculate_distance(coords1, coords2):
     lat1, lon1 = map(float, coords1.split(','))
     lat2, lon2 = map(float, coords2.split(','))
-    R = 6371  # 지구 반지름 (km)
-    
+    R = 6371
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dphi = math.radians(lat2 - lat1)
     dlambda = math.radians(lon2 - lon1)
-    
     a = math.sin(dphi/2)**2 + math.cos(phi1)*math.cos(phi2)*math.sin(dlambda/2)**2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
-import math # math 모듈 임포트
-
 @st.cache_data(ttl=3600)
 def get_holidays_for_period(api_key, country_code, start_date, end_date):
-    """Calendarific API: 선택한 기간의 공휴일"""
     all_holidays = set()
     for month_start in pd.date_range(start_date, end_date, freq='MS'):
         try:
@@ -120,7 +117,6 @@ def get_holidays_for_period(api_key, country_code, start_date, end_date):
 
 @st.cache_data(ttl=3600)
 def get_historical_weather(latitude, longitude, start_date, end_date):
-    """Open-Meteo API: 과거 날씨 데이터"""
     try:
         url = "https://archive-api.open-meteo.com/v1/archive"
         params = {
@@ -136,7 +132,6 @@ def get_historical_weather(latitude, longitude, start_date, end_date):
 
 @st.cache_data(ttl=3600)
 def get_places_osm(lat, lon, osm_tag):
-    """OpenStreetMap: 구글 지도 링크 생성"""
     try:
         overpass_url = "http://overpass-api.de/api/interpreter"
         query = f"""
@@ -160,7 +155,7 @@ def get_places_osm(lat, lon, osm_tag):
         return pd.DataFrame(places)
     except: return pd.DataFrame()
 
-# --- 4. 데이터 처리 엔진 ---
+# --- 4. 데이터 처리 및 계산 엔진 ---
 
 def create_base_dataframe(weather_json, start_date, end_date):
     if not weather_json or 'daily' not in weather_json: return pd.DataFrame()
@@ -189,16 +184,54 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
     df['total_score'] = df['score_weather'] + df['score_rain'] + df['score_busy'] + df['score_free']
     return df
 
+def calculate_travel_cost(city_key, days, style):
+    """경비 계산 함수"""
+    base_cost = CITY_DATA[city_key]['cost']
+    
+    if style == "배낭여행 (절약)":
+        multiplier = 0.6
+    elif style == "일반 (표준)":
+        multiplier = 1.0
+    else: # 럭셔리
+        multiplier = 2.5
+        
+    total_cost = base_cost * days * multiplier
+    return int(total_cost)
+
+def generate_download_content(title, details_text):
+    """다운로드용 텍스트 생성"""
+    return f"""
+    ==========================================
+    ✈️ 여행 비서 AI - 추천 일정 리포트
+    ==========================================
+    
+    {title}
+    
+    {details_text}
+    
+    ------------------------------------------
+    * 본 정보는 AI 분석 결과이며 실제와 다를 수 있습니다.
+    * 날씨는 작년 데이터를 기반으로 예측되었습니다.
+    * 경비는 항공권을 제외한 현지 체류비 추정치입니다.
+    ==========================================
+    """
+
 # --- 모드 1: 개인 맞춤형 (Single) ---
 def run_mode_single_trip():
-    st.header("🎯 개인 맞춤형 여행 추천")
-    st.caption("가고 싶은 도시를 하나 골라, 최적의 여행 시기를 찾아보세요.")
-
+    st.header("🎯 모드 1: 개인 맞춤형 여행 추천")
+    
     col1, col2 = st.columns(2)
     with col1:
         country_key = st.selectbox("어디로 떠날까요? (도시 검색)", options=CITY_DATA.keys())
     with col2:
         theme_name = st.selectbox("여행 테마는?", options=THEME_OSM_MAP.keys())
+
+    # [신규] 여행 스타일 선택 (경비 계산용)
+    travel_style = st.select_slider(
+        "여행 스타일을 선택하세요 (경비 계산용)",
+        options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
+        value="일반 (표준)"
+    )
 
     priority_mode = st.radio(
         "여행 우선순위 선택", 
@@ -207,7 +240,7 @@ def run_mode_single_trip():
     )
 
     today = datetime.now().date()
-    st.write("📅 **언제 여행을 떠나시나요?**")
+    st.write("📅 **언제쯤 여행을 떠나시나요?**")
     date_range = st.date_input(
         "달력에서 기간 선택",
         value=(today + timedelta(days=30), today + timedelta(days=90)),
@@ -218,7 +251,7 @@ def run_mode_single_trip():
     
     trip_duration = st.slider("여행 기간 (박)", 3, 14, 5)
 
-    if st.button("최적 일정 찾기", type="primary"):
+    if st.button("최적 일정 찾기 & 경비 계산", type="primary"):
         if len(date_range) < 2: 
             st.error("달력에서 시작일과 종료일을 모두 선택해주세요.")
             st.stop()
@@ -230,7 +263,7 @@ def run_mode_single_trip():
         hist_start = start_date - pd.DateOffset(years=1)
         hist_end = end_date - pd.DateOffset(years=1)
         
-        with st.spinner(f"{country_key} 데이터 분석 중..."):
+        with st.spinner(f"{country_key} 분석 중..."):
             weather = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
             local_h = get_holidays_for_period(CALENDARIFIC_KEY, country_data["code"], start_date, end_date)
             kr_h = get_holidays_for_period(CALENDARIFIC_KEY, "KR", start_date, end_date)
@@ -255,7 +288,12 @@ def run_mode_single_trip():
             if not top_3:
                 st.warning("추천 기간을 찾지 못했습니다."); st.stop()
 
+            # --- 결과 출력 ---
             st.divider()
+            
+            # [신규] 비자 정보 표시
+            st.info(f"🛂 **비자 정보 ({country_data['country']}):** {country_data['visa']}")
+
             st.subheader(f"🗺️ '{theme_name}' 추천 장소 ({country_key})")
             if not places_df.empty:
                 st.dataframe(places_df, column_config={"지도 보기": st.column_config.LinkColumn("구글 지도", display_text="📍 지도 열기")}, hide_index=True, use_container_width=True)
@@ -265,6 +303,8 @@ def run_mode_single_trip():
             st.write("---")
             st.subheader(f"🏆 추천 여행 기간 Best 3")
             
+            download_text = "" # 다운로드용 텍스트 버퍼
+
             for i, period in enumerate(top_3):
                 p_start = period['start'].strftime('%Y-%m-%d')
                 p_end = period['end'].strftime('%Y-%m-%d')
@@ -273,27 +313,44 @@ def run_mode_single_trip():
                 rain_sum = period['window']['precipitation_sum'].sum()
                 free_days = period['window']['is_free_day'].sum()
                 
+                # [신규] 경비 계산
+                est_cost = calculate_travel_cost(country_key, trip_duration, travel_style)
+                
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
+                # 다운로드 텍스트 추가
+                download_text += f"[{i+1}순위] {p_start} ~ {p_end}\n"
+                download_text += f" - 예상 기온: {temp_avg:.1f}도 / 강수량: {rain_sum:.1f}mm\n"
+                download_text += f" - 예상 경비: 약 {est_cost:,}원 ({travel_style})\n\n"
+
                 with st.expander(f"{medal} {i+1}순위: {p_start} ~ {p_end} (종합 점수: {score:.0f}점)", expanded=(i==0)):
-                    c1, c2, c3 = st.columns(3)
+                    c1, c2, c3, c4 = st.columns(4)
                     c1.metric("예상 기온", f"{temp_avg:.1f}°C")
                     c2.metric("예상 강수", f"{rain_sum:.1f}mm")
                     c3.metric("휴일 포함", f"{free_days}일")
+                    # [신규] 경비 표시
+                    c4.metric("예상 경비", f"{est_cost // 10000}만 원")
+                    
+                    st.caption(f"💰 항공권을 제외한 {trip_duration}박 체류비 ({travel_style} 기준)")
                     if temp_avg > 28: st.caption("🥵 더운 날씨 대비 필요")
                     elif temp_avg < 5: st.caption("🥶 추운 날씨 대비 필요")
                     elif 15 <= temp_avg <= 25: st.caption("🌿 여행하기 최적의 날씨!")
 
-# --- 모드 2: 장기 여행 (루트 최적화) ---
-def run_mode_long_trip():
-    st.header("🌏 장기 여행 (루트 최적화)")
-    st.caption("여러 도시를 효율적으로 방문하는 순서(루트)를 제안합니다.")
+            # [신규] 일정 저장 버튼
+            st.download_button(
+                label="📥 추천 일정 저장하기 (TXT)",
+                data=generate_download_content(f"{country_key} 여행 추천 ({trip_duration}박)", download_text),
+                file_name=f"MyTrip_{country_key}_{today}.txt",
+                mime="text/plain"
+            )
 
-    # 1. 나라 선택
+# --- 모드 2: 장기 여행 (Long-term) ---
+def run_mode_long_trip():
+    st.header("🌏 모드 2: 장기 여행 (루트 최적화)")
+
     unique_countries = sorted(list(set([v['country'] for v in CITY_DATA.values()])))
     selected_nations = st.multiselect("방문할 나라들을 선택하세요", unique_countries)
 
-    # 2. 도시 자동 필터링 및 선택
     available_cities = []
     if selected_nations:
         available_cities = [k for k, v in CITY_DATA.items() if v['country'] in selected_nations]
@@ -308,58 +365,77 @@ def run_mode_long_trip():
         st.info("나라를 먼저 선택해주세요.")
         return
 
-    # [신규] 출발 도시 선택
-    start_city = st.selectbox("어디서 여행을 시작하시나요?", options=selected_cities)
+    start_city = st.selectbox("어디서 여행을 시작하시나요? (출발 도시)", options=selected_cities)
 
     col1, col2 = st.columns(2)
     with col1:
         start_date = st.date_input("여행 시작일", value=datetime.now().date() + timedelta(days=30))
     with col2:
-        # [변경] 개월 -> 주 단위로 변경
         total_weeks = st.slider("전체 여행 기간 (주)", 1, 12, 4)
     
+    # [신규] 스타일 선택
+    travel_style = st.select_slider(
+        "여행 스타일 (전체 경비 계산용)",
+        options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
+        value="배낭여행 (절약)"
+    )
+
     total_days = total_weeks * 7
 
-    if st.button("효율적인 여행 루트 짜기", type="primary"):
+    if st.button("루트 최적화 & 통합 경비 계산", type="primary"):
         if len(selected_cities) < 2:
-            st.warning("2개 이상의 도시를 선택해주세요."); st.stop()
+            st.warning("루트를 짜려면 2개 이상의 도시가 필요합니다."); st.stop()
 
-        # --- 루트 최적화 (Greedy: Nearest Neighbor) ---
+        # 루트 최적화 (Greedy)
         route = [start_city]
         unvisited = [c for c in selected_cities if c != start_city]
         current_city = start_city
 
         while unvisited:
-            # 현재 도시에서 가장 가까운 도시 찾기
             curr_coords = CITY_DATA[current_city]["coords"]
-            
-            # 거리 계산 및 정렬 lambda (x: 도시명)
             nearest_city = min(unvisited, key=lambda x: calculate_distance(curr_coords, CITY_DATA[x]["coords"]))
-            
             route.append(nearest_city)
             unvisited.remove(nearest_city)
             current_city = nearest_city
 
-        # --- 일정 배분 및 날씨 체크 ---
-        days_per_city = max(2, total_days // len(route)) # 도시당 최소 2일 보장 노력
+        days_per_city = max(2, total_days // len(route))
         
         st.divider()
         st.subheader(f"🗺️ 추천 여행 루트 ({len(route)}개 도시, 총 {total_weeks}주)")
-        st.write("지리적 거리와 효율성을 고려하여 다음 순서를 추천합니다:")
+        
+        # [신규] 전체 요약 (총 경비, 비자)
+        total_est_cost = 0
+        visa_summary = set()
+        download_text = "[[ 추천 루트 ]]\n"
 
-        # 루트 시각화 (간단한 화살표)
-        route_str = "  ➡️  ".join([f"**{city.split('(')[0].strip()}**" for city in route])
-        st.info(route_str)
+        # 루트 계산 및 미리보기
+        for city in route:
+            # 마지막 도시는 잔여일 계산, 나머지는 균등분배
+            if city == route[-1]:
+                stay = total_days - (days_per_city * (len(route)-1))
+            else:
+                stay = days_per_city
+            
+            cost = calculate_travel_cost(city, stay, travel_style)
+            total_est_cost += cost
+            visa_summary.add(f"{CITY_DATA[city]['country']}: {CITY_DATA[city]['visa']}")
+            
+            download_text += f" -> {city} ({stay}박)\n"
 
-        st.subheader("📅 도시별 상세 일정 및 날씨 예보")
+        c1, c2 = st.columns(2)
+        c1.metric("총 예상 경비", f"약 {total_est_cost // 10000}만 원", f"{travel_style}")
+        c2.info("**비자 요약:**\n" + "\n".join([f"- {v}" for v in visa_summary]))
+
+        st.write("---")
+        st.subheader("📅 도시별 상세 일정")
         
         current_date = start_date
+        download_text += "\n[[ 상세 일정 ]]\n"
         
         for idx, city in enumerate(route):
             city_data = CITY_DATA[city]
             lat, lon = city_data["coords"].split(',')
             
-            # 마지막 도시는 남은 기간 전부 소진
             if idx == len(route) - 1:
                 stay_days = (start_date + timedelta(days=total_days) - current_date).days
             else:
@@ -368,42 +444,40 @@ def run_mode_long_trip():
             arrival_date = current_date
             departure_date = current_date + timedelta(days=stay_days)
             
-            # 작년 날씨 확인
             hist_start = arrival_date - pd.DateOffset(years=1)
             hist_end = departure_date - pd.DateOffset(years=1)
             
-            with st.spinner(f"{city} 날씨 확인 중..."):
+            with st.spinner(f"{city} 분석 중..."):
                 weather = get_historical_weather(lat, lon, hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
                 df = create_base_dataframe(weather, hist_start, hist_end)
             
             weather_desc = "데이터 없음"
-            temp_avg = 0
             if not df.empty:
-                temp_avg = df['temperature_2m_max'].mean()
-                rain_sum = df['precipitation_sum'].sum()
-                
-                if temp_avg > 28: weather_status = "🥵 더움"
-                elif temp_avg < 5: weather_status = "🥶 추움"
-                elif 15 <= temp_avg <= 25: weather_status = "🌿 쾌적"
-                else: weather_status = "😐 보통"
-                
-                if rain_sum > 30: weather_status += ", ☔ 비 많음"
-                weather_desc = f"평균 {temp_avg:.1f}°C ({weather_status})"
+                temp = df['temperature_2m_max'].mean()
+                status = "🌿 쾌적" if 15 <= temp <= 25 else ("🥵 더움" if temp > 28 else "🥶 추움")
+                weather_desc = f"평균 {temp:.1f}°C ({status})"
 
-            # 카드 형태로 일정 출력
+            detail_str = f"{idx+1}. {city} ({stay_days}박): {arrival_date.strftime('%Y-%m-%d')} ~"
+            download_text += f"{detail_str} | 날씨: {weather_desc}\n"
+
             with st.container():
                 st.markdown(f"### {idx+1}. {city}")
                 c1, c2, c3 = st.columns([2, 2, 1])
-                c1.write(f"🗓️ **일정:** {arrival_date.strftime('%Y-%m-%d')} ~ {departure_date.strftime('%m-%d')} ({stay_days}박)")
-                c2.write(f"🌦️ **예상 날씨:** {weather_desc}")
-                
-                # 구글 맵 링크
+                c1.write(f"🗓️ **일정:** {arrival_date.strftime('%m/%d')} ~ {departure_date.strftime('%m/%d')} ({stay_days}박)")
+                c2.write(f"🌦️ **날씨:** {weather_desc}")
                 map_link = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-                c3.markdown(f"[📍 지도 보기]({map_link})")
-                
+                c3.markdown(f"[📍 지도]({map_link})")
                 st.divider()
 
-            current_date = departure_date # 다음 도시 도착일 = 이번 도시 출발일
+            current_date = departure_date
+
+        # [신규] 장기 여행 일정 저장
+        st.download_button(
+            label="📥 전체 루트 저장하기 (TXT)",
+            data=generate_download_content(f"장기 여행 루트 ({len(route)}개 도시)", download_text),
+            file_name=f"LongTrip_Route_{start_date}.txt",
+            mime="text/plain"
+        )
 
 # --- 메인 앱 실행 ---
 def main():
@@ -418,7 +492,7 @@ def main():
 
     if app_mode == "개인 맞춤형 (Single)":
         run_mode_single_trip()
-    elif app_mode == "장기 여행 (Long-term)": # 이름 변경 반영
+    elif app_mode == "장기 여행 (Long-term)":
         run_mode_long_trip()
 
 if __name__ == "__main__":
