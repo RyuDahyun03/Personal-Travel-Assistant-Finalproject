@@ -35,7 +35,10 @@ CITY_DATA = {
     "🇮🇩 인도네시아 (발리)": {"code": "ID", "city": "Bali", "coords": "-8.4095,115.1889", "country": "인도네시아", "cost": 110000, "visa": "도착비자 필요 (약 4만원)"},
     "🇵🇭 필리핀 (세부)": {"code": "PH", "city": "Cebu", "coords": "10.3157,123.8854", "country": "필리핀", "cost": 90000, "visa": "무비자 (30일)"},
 
-    # [유럽 - 프랑스 집중]
+    # [유럽 - 서유럽]
+    "🇬🇧 영국 (런던)": {"code": "GB", "city": "London", "coords": "51.5074,-0.1278", "country": "영국", "cost": 280000, "visa": "무비자 (6개월)"},
+    "🇬🇧 영국 (에든버러)": {"code": "GB", "city": "Edinburgh", "coords": "55.9533,-3.1883", "country": "영국", "cost": 260000, "visa": "무비자 (6개월)"},
+    "🇮🇪 아일랜드 (더블린)": {"code": "IE", "city": "Dublin", "coords": "53.3498,-6.2603", "country": "아일랜드", "cost": 250000, "visa": "무비자 (90일)"},
     "🇫🇷 프랑스 (파리)": {"code": "FR", "city": "Paris", "coords": "48.8566,2.3522", "country": "프랑스", "cost": 250000, "visa": "무비자 (90일)"},
     "🇫🇷 프랑스 (니스)": {"code": "FR", "city": "Nice", "coords": "43.7102,7.2620", "country": "프랑스", "cost": 260000, "visa": "무비자 (90일)"},
     "🇫🇷 프랑스 (리옹)": {"code": "FR", "city": "Lyon", "coords": "45.7640,4.8357", "country": "프랑스", "cost": 200000, "visa": "무비자 (90일)"},
@@ -45,11 +48,6 @@ CITY_DATA = {
     "🇫🇷 프랑스 (몽생미셸)": {"code": "FR", "city": "Mont Saint-Michel", "coords": "48.6360,-1.5115", "country": "프랑스", "cost": 210000, "visa": "무비자 (90일)"},
     "🇫🇷 프랑스 (아비뇽)": {"code": "FR", "city": "Avignon", "coords": "43.9493,4.8055", "country": "프랑스", "cost": 180000, "visa": "무비자 (90일)"},
     "🇫🇷 프랑스 (콜마르)": {"code": "FR", "city": "Colmar", "coords": "48.0794,7.3585", "country": "프랑스", "cost": 170000, "visa": "무비자 (90일)"},
-
-    # [유럽 - 서유럽]
-    "🇬🇧 영국 (런던)": {"code": "GB", "city": "London", "coords": "51.5074,-0.1278", "country": "영국", "cost": 280000, "visa": "무비자 (6개월)"},
-    "🇬🇧 영국 (에든버러)": {"code": "GB", "city": "Edinburgh", "coords": "55.9533,-3.1883", "country": "영국", "cost": 260000, "visa": "무비자 (6개월)"},
-    "🇮🇪 아일랜드 (더블린)": {"code": "IE", "city": "Dublin", "coords": "53.3498,-6.2603", "country": "아일랜드", "cost": 250000, "visa": "무비자 (90일)"},
     "🇧🇪 벨기에 (브뤼셀)": {"code": "BE", "city": "Brussels", "coords": "50.8503,4.3517", "country": "벨기에", "cost": 210000, "visa": "무비자 (90일)"},
     "🇳🇱 네덜란드 (암스테르담)": {"code": "NL", "city": "Amsterdam", "coords": "52.3676,4.9041", "country": "네덜란드", "cost": 230000, "visa": "무비자 (90일)"},
 
@@ -293,7 +291,7 @@ def get_flight_link(destination_key):
 
 # --- 모드 1: 개인 맞춤형 ---
 def run_mode_single_trip():
-    st.header("🎯 모드 1: 개인 맞춤형 여행 추천")
+    st.header("🎯 개인 맞춤형 여행 추천")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -307,7 +305,7 @@ def run_mode_single_trip():
     priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
     today = datetime.now().date()
-    st.write("📅 **언제쯤 가시나요?**")
+    st.write("📅 **언제 가시나요?**")
     date_range = st.date_input(
         "기간 선택",
         value=(today+timedelta(30), today+timedelta(90)),
@@ -381,7 +379,7 @@ def run_mode_single_trip():
 
 # --- 모드 2: 장기 여행 ---
 def run_mode_long_trip():
-    st.header("🌏 모드 2: 장기 여행 (루트 최적화)")
+    st.header("🌏 장기 여행 (루트 최적화)")
     
     # [신규] 나라 선택으로 필터링
     countries = sorted(list(set([v['country'] for v in CITY_DATA.values()])))
@@ -398,7 +396,7 @@ def run_mode_long_trip():
     with col1: start_date = st.date_input("시작일", value=datetime.now().date()+timedelta(30))
     with col2: total_weeks = st.slider("기간 (주)", 1, 12, 4)
     
-    travel_style = st.radio("여행 스타일", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], horizontal=True)
+    travel_style = st.radio("여행 스타일", ["절약", "일반", "럭셔리"], horizontal=True)
     total_days = total_weeks * 7
 
     if st.button("🚀 루트 최적화", type="primary"):
@@ -426,8 +424,7 @@ def run_mode_long_trip():
         
         # 총 비용 계산
         for i, city in enumerate(route):
-            stay = (start_date + timedelta(total_days) - start_date).days if i == len(route)-1 else days_per_city # 단순화
-            # 실제 날짜별 비용 계산은 복잡하므로 단순 합산
+            stay = (start_date + timedelta(total_days) - start_date).days if i == len(route)-1 else days_per_city
             total_cost += calculate_travel_cost(city, days_per_city, travel_style)
             visa_list.add(f"{CITY_DATA[city]['country']}: {CITY_DATA[city]['visa']}")
 
@@ -469,9 +466,9 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (수정됨) ---
+# --- 모드 3: AI 챗봇 (수정됨: 모델명 gemini-1.5-flash) ---
 def run_mode_chat():
-    st.header("🤖 AI 여행 상담소")
+    st.header("🤖 AI 여행 플래너")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
 
     if not GEMINI_KEY:
@@ -491,7 +488,7 @@ def run_mode_chat():
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
                 try:
-                    # [수정] 모델명 변경: gemini-pro -> gemini-1.5-flash
+                    # [수정] 최신 모델명으로 변경 (404 오류 해결)
                     model = genai.GenerativeModel('gemini-1.5-flash')
                     response = model.generate_content(prompt)
                     ai_msg = response.text
@@ -507,15 +504,15 @@ def main():
     
     with st.sidebar:
         st.title("✈️ 여행 비서 AI")
-        app_mode = st.radio("메뉴 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)"])
+        app_mode = st.radio("메뉴 선택", ["개인 맞춤형 단기 여행", "장기 여행", "AI 여행 플래너"])
         st.write("---")
         st.caption("Made with Streamlit")
 
-    if app_mode == "개인 맞춤형 (Single)":
+    if app_mode == "개인 맞춤형 단기 여행":
         run_mode_single_trip()
-    elif app_mode == "장기 여행 (Long-term)":
+    elif app_mode == "장기 여행":
         run_mode_long_trip()
-    elif app_mode == "AI 상담소 (Chat)":
+    elif app_mode == "AI 여행 플래너":
         run_mode_chat()
 
 if __name__ == "__main__":
