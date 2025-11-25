@@ -4,11 +4,9 @@ import pandas as pd
 import math
 from datetime import datetime, timedelta
 import io
-import pydeck as pdk # [추가] 지도 시각화를 위한 라이브러리
+import pydeck as pdk
 
-# --- 1. 전 세계 주요 도시 데이터 ---
-# 비용: 1인 1일 기준 (숙박+식비+교통) - 일반 여행객 기준 (KRW)
-# 비자: 한국 여권 소지자 기준
+# --- 1. 전 세계 주요 도시 데이터 (경비/비자 정보) ---
 CITY_DATA = {
     # [동북아시아]
     "🇯🇵 일본 (도쿄)": {"code": "JP", "city": "Tokyo", "coords": "35.6895,139.6917", "country": "일본", "cost": 180000, "visa": "무비자 (90일)"},
@@ -97,7 +95,7 @@ def calculate_distance(coords1, coords2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
-# [신규 함수 1] 지도 시각화 (루트 그리기)
+# [수정] 지도 시각화 (map_style 제거)
 def draw_route_map(route_cities):
     """PyDeck을 사용하여 지도 위에 이동 경로(Arc)를 그립니다."""
     map_data = []
@@ -135,14 +133,15 @@ def draw_route_map(route_cities):
         pitch=30,
     )
 
+    # map_style을 None으로 설정하여 기본 스타일 사용 (API 키 불필요)
     st.pydeck_chart(pdk.Deck(
         layers=[layer],
         initial_view_state=view_state,
-        map_style="mapbox://styles/mapbox/light-v9",
+        map_style=None, 
         tooltip={"text": "{name}"}
     ))
 
-# [신규 함수 2] 짐 싸기 조언 생성
+# 짐 싸기 조언 생성
 def get_packing_tips(avg_temp, rain_sum):
     tips = []
     if avg_temp < 5: tips.append("🧥 두꺼운 패딩/코트, 목도리, 장갑 (매우 추움)")
@@ -156,9 +155,8 @@ def get_packing_tips(avg_temp, rain_sum):
     if not tips: tips.append("평범한 여행 복장이면 충분합니다.")
     return "\n".join([f"- {t}" for t in tips])
 
-# [신규 함수 3] 구글 플라이트 링크 생성
+# 구글 플라이트 링크 생성
 def get_flight_link(destination_key):
-    # 도시 이름(영어) 추출 (예: "Tokyo")
     query_city = CITY_DATA[destination_key]['city']
     return f"https://www.google.com/travel/flights?q=Flights+to+{query_city}"
 
@@ -291,7 +289,7 @@ def run_mode_single_trip():
     with col2:
         theme_name = st.selectbox("여행 테마는?", options=THEME_OSM_MAP.keys())
 
-    # [수정 완료] 여행 스타일 선택 (라디오 버튼)
+    # 여행 스타일 선택 (라디오 버튼)
     travel_style = st.radio(
         "여행 스타일 선택 (경비 계산용)",
         options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
@@ -378,17 +376,19 @@ def run_mode_single_trip():
                 rain_sum = period['window']['precipitation_sum'].sum()
                 free_days = period['window']['is_free_day'].sum()
                 
+                # 경비 계산
                 est_cost = calculate_travel_cost(country_key, trip_duration, travel_style)
                 
-                # [신규 적용] 짐 싸기 조언
+                # 짐 싸기 조언
                 packing_tips = get_packing_tips(temp_avg, rain_sum)
                 
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
+                # 다운로드 텍스트 추가
                 download_text += f"[{i+1}순위] {p_start} ~ {p_end}\n"
-                download_text += f" - 기온: {temp_avg:.1f}도 / 강수: {rain_sum:.1f}mm\n"
+                download_text += f" - 예상 기온: {temp_avg:.1f}도 / 강수량: {rain_sum:.1f}mm\n"
                 download_text += f" - 준비물: {packing_tips.replace(chr(10), ', ')}\n"
-                download_text += f" - 예상 경비: {est_cost:,}원 ({travel_style})\n\n"
+                download_text += f" - 예상 경비: 약 {est_cost:,}원 ({travel_style})\n\n"
 
                 with st.expander(f"{medal} {i+1}순위: {p_start} ~ {p_end} (종합 점수: {score:.0f}점)", expanded=(i==0)):
                     c1, c2, c3, c4 = st.columns(4)
@@ -399,10 +399,10 @@ def run_mode_single_trip():
                     
                     st.caption(f"💰 {trip_duration}박 체류비 ({travel_style})")
                     
-                    # [신규 적용] 짐 싸기 정보 표시
+                    # 짐 싸기 정보 표시
                     st.info(f"🧳 **챙겨야 할 것들:**\n{packing_tips}")
                     
-                    # [신규 적용] 항공권 링크 버튼
+                    # 항공권 링크 버튼
                     flight_url = get_flight_link(country_key)
                     st.link_button("✈️ 실시간 항공권 가격 확인하기 (Google Flights)", flight_url)
 
@@ -442,7 +442,7 @@ def run_mode_long_trip():
     with col2:
         total_weeks = st.slider("전체 여행 기간 (주)", 1, 12, 4)
     
-    # [수정 완료] 여행 스타일 선택 (라디오 버튼)
+    # 여행 스타일 선택 (라디오 버튼)
     travel_style = st.radio(
         "여행 스타일 (전체 경비 계산용)",
         options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
@@ -472,7 +472,7 @@ def run_mode_long_trip():
         st.divider()
         st.subheader(f"🗺️ 추천 여행 루트 ({len(route)}개 도시, 총 {total_weeks}주)")
         
-        # [신규 적용] 지도 시각화 호출
+        # 지도 시각화 (map_style 수정됨)
         draw_route_map(route)
         
         total_est_cost = 0
