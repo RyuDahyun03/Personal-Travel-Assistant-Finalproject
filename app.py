@@ -88,13 +88,19 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 
 @st.cache_data(ttl=3600)
 def search_city_coordinates(city_name):
+    """Nominatim API: 전 세계 도시 검색 (User-Agent 강화)"""
     try:
         url = "https://nominatim.openstreetmap.org/search"
         params = {"q": city_name, "format": "json", "limit": 1, "accept-language": "ko"}
-        headers = {'User-Agent': 'MyTravelApp/1.0'}
+        
+        # [수정] User-Agent를 고유하게 변경 (본인의 이메일을 넣거나 랜덤한 문자열 추가)
+        # 예: 'MyTravelApp/1.0 (myemail@example.com)'
+        headers = {'User-Agent': 'TravelPlanner_Student_Project/1.0'} 
+        
         res = requests.get(url, params=params, headers=headers)
         res.raise_for_status()
         data = res.json()
+        
         if data:
             return {
                 "name": data[0]['display_name'],
@@ -103,7 +109,10 @@ def search_city_coordinates(city_name):
                 "country_code": data[0].get('address', {}).get('country_code', 'KR').upper() 
             }
         return None
-    except: return None
+    except Exception as e:
+        # 에러 발생 시 로그 출력 (디버깅용)
+        st.error(f"검색 중 오류 발생: {e}")
+        return None
 
 # --- 3. 데이터 API 함수 ---
 
