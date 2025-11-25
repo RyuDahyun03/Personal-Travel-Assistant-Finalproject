@@ -3,8 +3,10 @@ import requests
 import pandas as pd
 import math
 from datetime import datetime, timedelta
+import io
 import pydeck as pdk
 import time
+import google.generativeai as genai # [신규] AI 채팅용 라이브러리
 
 # --- 설정: 테마 매핑 ---
 THEME_OSM_MAP = {
@@ -14,48 +16,39 @@ THEME_OSM_MAP = {
     "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# --- 1. API 키 확인 ---
+# --- 1. API 키 확인 및 설정 ---
 CALENDARIFIC_KEY = st.secrets.get("calendarific_key")
+GEMINI_KEY = st.secrets.get("gemini_key")
 
 def check_api_keys():
     if not CALENDARIFIC_KEY:
         st.sidebar.error("⚠️ Calendarific API 키가 설정되지 않았습니다.")
         st.stop()
 
-# --- 2. 핵심 유틸리티 함수 (검색 엔진) ---
+# [신규] Gemini AI 설정
+if GEMINI_KEY:
+    genai.configure(api_key=GEMINI_KEY)
+
+# --- 2. 핵심 유틸리티 함수 ---
 
 @st.cache_data(ttl=3600)
 def search_city_coordinates(city_name):
-    """
-    Nominatim API를 사용하여 전 세계 도시의 좌표를 검색합니다.
-    """
     try:
         url = "https://nominatim.openstreetmap.org/search"
-        params = {
-            "q": city_name,
-            "format": "json",
-            "limit": 1,
-            "accept-language": "ko" # 한국어 결과 선호
-        }
-        # Nominatim은 User-Agent 헤더가 필수입니다.
+        params = {"q": city_name, "format": "json", "limit": 1, "accept-language": "ko"}
         headers = {'User-Agent': 'MyTravelApp/1.0'}
-        
         res = requests.get(url, params=params, headers=headers)
         res.raise_for_status()
         data = res.json()
-        
         if data:
             return {
                 "name": data[0]['display_name'],
                 "lat": float(data[0]['lat']),
                 "lon": float(data[0]['lon']),
-                # 국가 코드가 없는 경우도 대비
                 "country_code": data[0].get('address', {}).get('country_code', 'KR').upper() 
             }
-        else:
-            return None
-    except:
         return None
+    except: return None
 
 def calculate_distance(lat1, lon1, lat2, lon2):
     R = 6371
@@ -71,16 +64,11 @@ def calculate_distance(lat1, lon1, lat2, lon2):
 @st.cache_data(ttl=3600)
 def get_holidays_for_period(api_key, country_code, start_date, end_date):
     all_holidays = set()
-    # 국가 코드가 없으면 검색하지 않음
     if not country_code: return all_holidays
-    
     for month_start in pd.date_range(start_date, end_date, freq='MS'):
         try:
             url = "https://calendarific.com/api/v2/holidays"
-            params = {
-                "api_key": api_key, "country": country_code, 
-                "year": month_start.year, "month": month_start.month
-            }
+            params = {"api_key": api_key, "country": country_code, "year": month_start.year, "month": month_start.month}
             res = requests.get(url, params=params)
             if res.status_code == 200:
                 holidays = res.json().get("response", {}).get("holidays", [])
@@ -118,7 +106,6 @@ def get_places_osm(lat, lon, osm_tag):
         res = requests.get(overpass_url, params={'data': query})
         res.raise_for_status()
         data = res.json()
-        
         places = []
         for el in data.get('elements', []):
             name = el.get('tags', {}).get('name')
@@ -133,74 +120,34 @@ def get_places_osm(lat, lon, osm_tag):
 # --- 4. 시각화 및 계산 ---
 
 def draw_route_map(route_cities_data):
-    """route_cities_data: [{'name':..., 'lat':..., 'lon':...}, ...]"""
     map_data = []
     for i in range(len(route_cities_data)):
         city = route_cities_data[i]
         map_data.append({
             "coordinates": [city['lon'], city['lat']],
-            "name": f"{i+1}. {city['name'].split(',')[0]}", # 앞부분 이름만 표시
-            "size": 50000,
-            "color": [0, 200, 100, 200]
+            "name": f"{i+1}. {city['name'].split(',')[0]}",
+            "size": 50000, "color": [0, 200, 100, 200]
         })
 
     scatter_layer = pdk.Layer(
-        "ScatterplotLayer",
-        data=map_data,
-        get_position="coordinates",
-        get_fill_color="color",
-        get_radius="size",
-        pickable=True,
-        radius_scale=1,
-        radius_min_pixels=10,
-        radius_max_pixels=30,
+        "ScatterplotLayer", data=map_data, get_position="coordinates",
+        get_fill_color="color", get_radius="size", pickable=True,
+        radius_scale=1, radius_min_pixels=10, radius_max_pixels=30,
     )
-
     text_layer = pdk.Layer(
-        "TextLayer",
-        data=map_data,
-        get_position="coordinates",
-        get_text="name",
-        get_size=18,
-        get_color=[0, 0, 0],
-        get_angle=0,
-        get_text_anchor="middle",
-        get_alignment_baseline="bottom",
+        "TextLayer", data=map_data, get_position="coordinates",
+        get_text="name", get_size=18, get_color=[0, 0, 0],
+        get_angle=0, get_text_anchor="middle", get_alignment_baseline="bottom",
         pixel_offset=[0, -15]
     )
-
-    # 경로 라인 (선택 사항)
-    line_data = []
-    for i in range(len(route_cities_data) - 1):
-        start = route_cities_data[i]
-        end = route_cities_data[i+1]
-        line_data.append({
-            "start": [start['lon'], start['lat']],
-            "end": [end['lon'], end['lat']]
-        })
-    
+    line_data = [{"start": [route_cities_data[i]['lon'], route_cities_data[i]['lat']], "end": [route_cities_data[i+1]['lon'], route_cities_data[i+1]['lat']]} for i in range(len(route_cities_data)-1)]
     line_layer = pdk.Layer(
-        "LineLayer",
-        data=line_data,
-        get_source_position="start",
-        get_target_position="end",
-        get_color=[100, 100, 100, 100],
-        get_width=3
+        "LineLayer", data=line_data, get_source_position="start",
+        get_target_position="end", get_color=[100, 100, 100, 100], get_width=3
     )
 
-    view_state = pdk.ViewState(
-        latitude=route_cities_data[0]['lat'],
-        longitude=route_cities_data[0]['lon'],
-        zoom=3,
-        pitch=0,
-    )
-
-    st.pydeck_chart(pdk.Deck(
-        layers=[line_layer, scatter_layer, text_layer],
-        initial_view_state=view_state,
-        map_style=None,
-        tooltip={"text": "{name}"}
-    ))
+    view_state = pdk.ViewState(latitude=route_cities_data[0]['lat'], longitude=route_cities_data[0]['lon'], zoom=3)
+    st.pydeck_chart(pdk.Deck(layers=[line_layer, scatter_layer, text_layer], initial_view_state=view_state, map_style=None, tooltip={"text": "{name}"}))
 
 def create_base_dataframe(weather_json, start_date, end_date):
     if not weather_json or 'daily' not in weather_json: return pd.DataFrame()
@@ -231,81 +178,47 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
 
 def get_packing_tips(avg_temp, rain_sum):
     tips = []
-    if avg_temp < 5: tips.append("🧥 두꺼운 패딩/코트, 목도리, 장갑 (추움)")
-    elif 5 <= avg_temp < 15: tips.append("🧥 경량 패딩, 자켓, 히트텍 (쌀쌀)")
-    elif 15 <= avg_temp < 22: tips.append("👕 긴팔 티셔츠, 가디건 (쾌적)")
-    elif avg_temp >= 22: tips.append("👕 반팔, 반바지, 선글라스 (더움)")
-    
-    if rain_sum > 30: tips.append("☂️ 우산/우비 필수 (비)")
-    if avg_temp > 25: tips.append("🧴 선크림, 모자")
+    if avg_temp < 5: tips.append("🧥 두꺼운 패딩, 장갑 (추움)")
+    elif 5 <= avg_temp < 15: tips.append("🧥 경량 패딩, 자켓 (쌀쌀)")
+    elif 15 <= avg_temp < 22: tips.append("👕 긴팔, 가디건 (쾌적)")
+    elif avg_temp >= 22: tips.append("👕 반팔, 선글라스 (더움)")
+    if rain_sum > 30: tips.append("☂️ 우산/우비 필수")
+    if avg_temp > 25: tips.append("🧴 선크림")
     return "\n".join([f"- {t}" for t in tips])
 
 def generate_download_content(title, details_text):
-    return f"""
-    ==========================================
-    ✈️ 여행 비서 AI - 추천 일정 리포트
-    ==========================================
-    {title}
-    
-    {details_text}
-    ------------------------------------------
-    * AI 분석 결과이며 실제와 다를 수 있습니다.
-    * 날씨는 작년 데이터를 기반으로 합니다.
-    ==========================================
-    """
+    return f"=== 여행 비서 리포트 ===\n{title}\n\n{details_text}"
 
-# --- 모드 1: 개인 맞춤형 (Single) ---
+# --- 모드 1: 개인 맞춤형 ---
 def run_mode_single_trip():
     st.header("🎯 모드 1: 개인 맞춤형 여행 추천")
-    
-    # 1. 도시 검색 (Nominatim)
-    st.subheader("1. 여행지 검색")
-    city_query = st.text_input("어디로 떠나고 싶으신가요? (예: 파리, 뉴욕, 다낭)", "")
+    city_query = st.text_input("어디로 떠나시나요? (예: 도쿄, 뉴욕)", "")
     
     search_data = None
     if city_query:
-        with st.spinner(f"'{city_query}' 찾는 중..."):
+        with st.spinner("위치 확인 중..."):
             search_data = search_city_coordinates(city_query)
-            if search_data:
-                st.success(f"📍 확인된 위치: {search_data['name']}")
-            else:
-                st.error("도시를 찾을 수 없습니다. 정확한 도시명을 입력해주세요.")
-                st.stop()
+            if search_data: st.success(f"📍 {search_data['name']}")
+            else: st.error("도시를 찾을 수 없습니다."); st.stop()
 
-    # 2. 테마 및 스타일
-    col1, col2 = st.columns(2)
-    with col1:
-        theme_name = st.selectbox("여행 테마", options=THEME_OSM_MAP.keys())
-    with col2:
-        daily_budget = st.number_input("1인 1일 예산 (원)", value=200000, step=10000)
+    c1, c2 = st.columns(2)
+    with c1: theme_name = st.selectbox("여행 테마", options=THEME_OSM_MAP.keys())
+    with c2: daily_budget = st.number_input("1일 예산 (원)", value=200000, step=10000)
 
     priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
-    # 3. 날짜 선택
     today = datetime.now().date()
-    st.subheader("2. 언제쯤 가시나요?")
-    date_range = st.date_input(
-        "기간 범위 선택",
-        value=(today + timedelta(days=30), today + timedelta(days=90)),
-        min_value=today,
-        max_value=today + timedelta(days=365)
-    )
+    date_range = st.date_input("기간 선택", value=(today+timedelta(30), today+timedelta(90)), min_value=today, max_value=today+timedelta(365))
     trip_duration = st.slider("여행 기간 (박)", 3, 14, 5)
 
     if st.button("분석 시작", type="primary", disabled=(search_data is None)):
-        if len(date_range) < 2: 
-            st.error("기간을 정확히 선택해주세요.")
-            st.stop()
-        
+        if len(date_range) < 2: st.error("기간을 선택하세요."); st.stop()
         start_date, end_date = date_range
-        # 국가 코드 처리 (Nominatim은 'kr', 'jp' 등 소문자일 수 있음 -> 대문자로 변환)
         country_code = search_data.get('country_code', 'KR').upper()
-        
-        # 작년 날씨
         hist_start = start_date - pd.DateOffset(years=1)
         hist_end = end_date - pd.DateOffset(years=1)
         
-        with st.spinner("데이터 분석 중..."):
+        with st.spinner("분석 중..."):
             weather = get_historical_weather(search_data['lat'], search_data['lon'], hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
             local_h = get_holidays_for_period(CALENDARIFIC_KEY, country_code, start_date, end_date)
             kr_h = get_holidays_for_period(CALENDARIFIC_KEY, "KR", start_date, end_date)
@@ -329,190 +242,178 @@ def run_mode_single_trip():
             
             st.divider()
             st.subheader(f"🗺️ '{theme_name}' 추천 장소")
-            if not places_df.empty:
-                st.dataframe(places_df, column_config={"지도 보기": st.column_config.LinkColumn("구글 지도", display_text="📍 지도")}, hide_index=True, use_container_width=True)
-            else:
-                st.info("주변 장소 데이터 없음")
+            if not places_df.empty: st.dataframe(places_df, column_config={"지도 보기": st.column_config.LinkColumn("구글 지도", display_text="📍 지도")}, hide_index=True, use_container_width=True)
+            else: st.info("주변 장소 데이터 없음")
 
             st.write("---")
-            st.subheader("🏆 최적의 여행 시기 Best 3")
-            
+            st.subheader("🏆 Best 3 일정")
             download_text = f"목적지: {search_data['name']}\n"
 
             for i, period in enumerate(top_3):
-                p_start = period['start'].strftime('%Y-%m-%d')
-                p_end = period['end'].strftime('%Y-%m-%d')
-                score = period['score']
-                temp_avg = period['window']['temperature_2m_max'].mean()
-                rain_sum = period['window']['precipitation_sum'].sum()
-                free_days = period['window']['is_free_day'].sum()
+                p_s = period['start'].strftime('%Y-%m-%d')
+                p_e = period['end'].strftime('%Y-%m-%d')
+                temp = period['window']['temperature_2m_max'].mean()
+                rain = period['window']['precipitation_sum'].sum()
+                free = period['window']['is_free_day'].sum()
+                cost = daily_budget * trip_duration
+                tips = get_packing_tips(temp, rain)
                 
-                est_cost = daily_budget * trip_duration
-                packing_tips = get_packing_tips(temp_avg, rain_sum)
-                medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
+                download_text += f"[{i+1}위] {p_s}~{p_e} / {temp:.1f}도 / {cost:,}원\n"
                 
-                download_text += f"[{i+1}순위] {p_start}~{p_end} / {temp_avg:.1f}도 / 예상경비 {est_cost:,}원\n"
-
-                with st.expander(f"{medal} {i+1}순위: {p_start} ~ {p_end} (점수: {score:.0f})", expanded=(i==0)):
+                with st.expander(f"{['🥇','🥈','🥉'][i] if i<3 else ''} {i+1}위: {p_s}~{p_e} ({period['score']:.0f}점)", expanded=(i==0)):
                     c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("기온", f"{temp_avg:.1f}°C")
-                    c2.metric("강수", f"{rain_sum:.1f}mm")
-                    c3.metric("휴일", f"{free_days}일")
-                    c4.metric("예상 경비", f"{est_cost // 10000}만 원")
-                    
-                    st.info(f"🧳 **팁:** {packing_tips}")
-                    
-                    # 항공권 링크 (도시명 영문/현지어 혼합일 수 있어 단순 검색)
-                    flight_query = search_data['name'].split(',')[0]
-                    st.link_button("✈️ 항공권 검색", f"https://www.google.com/travel/flights?q=Flights+to+{flight_query}")
+                    c1.metric("기온", f"{temp:.1f}°C")
+                    c2.metric("강수", f"{rain:.1f}mm")
+                    c3.metric("휴일", f"{free}일")
+                    c4.metric("경비", f"{cost//10000}만 원")
+                    st.info(f"🧳 **팁:** {tips}")
+                    flight_q = search_data['name'].split(',')[0]
+                    st.link_button("✈️ 항공권 검색", f"https://www.google.com/travel/flights?q=Flights+to+{flight_q}")
 
-            st.download_button("📥 결과 저장 (TXT)", generate_download_content(f"{city_query} 여행 분석", download_text), f"Trip_{today}.txt")
+            st.download_button("📥 결과 저장 (TXT)", generate_download_content("여행 분석", download_text), f"Trip_{today}.txt")
 
-# --- 모드 2: 장기 여행 (Long-term) ---
+# --- 모드 2: 장기 여행 ---
 def run_mode_long_trip():
     st.header("🌏 모드 2: 장기 여행 (전 세계 루트)")
-    st.caption("가고 싶은 도시들을 검색해서 장바구니에 담으세요. 최적의 루트를 짜드립니다.")
+    if 'selected_cities_data' not in st.session_state: st.session_state['selected_cities_data'] = []
 
-    # Session State로 도시 목록 관리
-    if 'selected_cities_data' not in st.session_state:
-        st.session_state['selected_cities_data'] = []
+    c1, c2 = st.columns([3, 1])
+    with c1: new_city = st.text_input("도시 검색 (예: 런던, 파리)", key="multi_input")
+    with c2: 
+        st.write("")
+        st.write("")
+        if st.button("추가 ➕") and new_city:
+            with st.spinner("찾는 중..."):
+                found = search_city_coordinates(new_city)
+                if found:
+                    if any(c['name'] == found['name'] for c in st.session_state['selected_cities_data']): st.warning("중복")
+                    else: st.session_state['selected_cities_data'].append(found); st.success(f"✅ {found['name'].split(',')[0]} 추가")
+                else: st.error("도시 없음")
 
-    # 1. 도시 추가 UI
-    with st.container():
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            new_city_query = st.text_input("도시 검색 (예: 런던, 파리, 로마)", key="multi_city_input")
-        with c2:
-            st.write("") 
-            st.write("")
-            add_btn = st.button("도시 추가 ➕")
-
-    if add_btn and new_city_query:
-        with st.spinner("위치 찾는 중..."):
-            found = search_city_coordinates(new_city_query)
-            if found:
-                # 중복 체크
-                if any(c['name'] == found['name'] for c in st.session_state['selected_cities_data']):
-                    st.warning("이미 추가된 도시입니다.")
-                else:
-                    st.session_state['selected_cities_data'].append(found)
-                    st.success(f"✅ {found['name'].split(',')[0]} 추가됨!")
-            else:
-                st.error("도시를 찾을 수 없습니다.")
-
-    # 2. 선택된 도시 목록 표시
     if st.session_state['selected_cities_data']:
-        st.write("---")
-        st.write("### 📋 선택된 도시 목록")
-        for i, city in enumerate(st.session_state['selected_cities_data']):
-            st.text(f"{i+1}. {city['name']}")
-        
-        if st.button("목록 초기화 🗑️"):
-            st.session_state['selected_cities_data'] = []
-            st.rerun()
-    else:
-        st.info("도시를 검색해서 추가해주세요.")
-        return # 도시 없으면 아래 실행 안함
+        st.write("### 📋 선택 목록")
+        for i, c in enumerate(st.session_state['selected_cities_data']): st.text(f"{i+1}. {c['name']}")
+        if st.button("초기화 🗑️"): st.session_state['selected_cities_data'] = []; st.rerun()
+    else: st.info("도시를 추가해주세요."); return
 
-    # 3. 설정 및 실행
     st.write("---")
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("여행 시작일", value=datetime.now().date() + timedelta(days=30))
-    with col2:
-        total_weeks = st.slider("전체 여행 기간 (주)", 1, 12, 4)
+    c1, c2 = st.columns(2)
+    with c1: start_date = st.date_input("시작일", value=datetime.now().date()+timedelta(30))
+    with c2: total_weeks = st.slider("기간 (주)", 1, 12, 4)
+    daily_budget = st.number_input("1일 평균 예산 (원)", value=150000)
     
-    daily_budget = st.number_input("전체 일정 1일 평균 예산 (원)", value=150000)
-    total_days = total_weeks * 7
-
-    if st.button("🚀 루트 최적화 및 분석", type="primary"):
+    if st.button("🚀 루트 최적화", type="primary"):
         cities = st.session_state['selected_cities_data']
-        if len(cities) < 2:
-            st.warning("최소 2개 이상의 도시가 필요합니다."); st.stop()
+        if len(cities) < 2: st.warning("2개 이상 필요"); st.stop()
 
-        # 루트 최적화 (Greedy Nearest Neighbor)
-        # 첫 번째 추가한 도시를 출발지로 가정
         route = [cities[0]]
         unvisited = cities[1:]
-        current = cities[0]
-
+        curr = cities[0]
         while unvisited:
-            # 가장 가까운 도시 찾기
-            nearest = min(unvisited, key=lambda x: calculate_distance(current['lat'], current['lon'], x['lat'], x['lon']))
+            nearest = min(unvisited, key=lambda x: calculate_distance(curr['lat'], curr['lon'], x['lat'], x['lon']))
             route.append(nearest)
             unvisited.remove(nearest)
-            current = nearest
+            curr = nearest
 
-        days_per_city = max(2, total_days // len(route))
-        
         st.divider()
-        st.subheader(f"🗺️ 추천 루트 ({len(route)}개 도시)")
-        
-        # 지도 그리기
+        st.subheader(f"🗺️ 추천 루트 ({len(route)}도시)")
         draw_route_map(route)
         
-        total_est_cost = daily_budget * total_days
-        st.metric("총 예상 경비 (항공권 제외)", f"약 {total_est_cost // 10000}만 원")
+        days_per_city = max(2, (total_weeks*7) // len(route))
+        total_cost = daily_budget * total_weeks * 7
+        st.metric("총 예상 경비", f"약 {total_cost//10000}만 원")
 
         st.write("---")
         st.subheader("📅 상세 일정")
-        
-        current_date = start_date
-        download_text = "[[ 장기 여행 루트 ]]\n"
+        curr_date = start_date
+        dl_text = "[[ 장기 여행 ]]\n"
         
         for idx, city in enumerate(route):
-            if idx == len(route) - 1:
-                stay_days = (start_date + timedelta(days=total_days) - current_date).days
-            else:
-                stay_days = days_per_city
+            stay = (start_date + timedelta(total_weeks*7) - curr_date).days if idx == len(route)-1 else days_per_city
+            arrival, departure = curr_date, curr_date + timedelta(stay)
             
-            arrival_date = current_date
-            departure_date = current_date + timedelta(days=stay_days)
-            
-            # 날씨 확인
-            hist_start = arrival_date - pd.DateOffset(years=1)
-            hist_end = departure_date - pd.DateOffset(years=1)
-            
+            h_start = arrival - pd.DateOffset(years=1)
+            h_end = departure - pd.DateOffset(years=1)
             with st.spinner(f"{city['name'].split(',')[0]} 분석..."):
-                weather = get_historical_weather(city['lat'], city['lon'], hist_start.strftime('%Y-%m-%d'), hist_end.strftime('%Y-%m-%d'))
-                df = create_base_dataframe(weather, hist_start, hist_end)
+                w = get_historical_weather(city['lat'], city['lon'], h_start.strftime('%Y-%m-%d'), h_end.strftime('%Y-%m-%d'))
+                df = create_base_dataframe(w, h_start, h_end)
             
-            weather_desc = "데이터 없음"
+            w_desc = "데이터 없음"
             if not df.empty:
-                temp = df['temperature_2m_max'].mean()
-                status = "쾌적" if 15 <= temp <= 25 else ("더움" if temp > 28 else "추움")
-                weather_desc = f"{temp:.1f}°C ({status})"
+                t = df['temperature_2m_max'].mean()
+                w_desc = f"{t:.1f}°C ({'쾌적' if 15<=t<=25 else '더움' if t>28 else '추움'})"
 
-            simple_name = city['name'].split(',')[0]
-            download_text += f"{idx+1}. {simple_name}: {arrival_date} ~ {departure_date} ({weather_desc})\n"
-
+            dl_text += f"{idx+1}. {city['name'].split(',')[0]}: {arrival}~{departure} / {w_desc}\n"
             with st.container():
-                st.markdown(f"**{idx+1}. {simple_name}** ({stay_days}박)")
-                c1, c2, c3 = st.columns([2, 2, 1])
-                c1.write(f"{arrival_date.strftime('%m/%d')} ~ {departure_date.strftime('%m/%d')}")
-                c2.write(f"🌡️ {weather_desc}")
+                st.markdown(f"**{idx+1}. {city['name'].split(',')[0]}** ({stay}박)")
+                c1, c2, c3 = st.columns([2,2,1])
+                c1.write(f"{arrival.strftime('%m/%d')}~{departure.strftime('%m/%d')}")
+                c2.write(f"🌡️ {w_desc}")
                 c3.link_button("📍 지도", f"https://www.google.com/maps/search/?api=1&query={city['lat']},{city['lon']}")
                 st.divider()
+            curr_date = departure
 
-            current_date = departure_date
+        st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-        st.download_button("📥 전체 일정 다운로드", generate_download_content("세계일주 루트", download_text), "LongTrip.txt")
+# --- 모드 3: AI 챗봇 (신규) ---
+def run_mode_chat():
+    st.header("🤖 AI 여행 상담소")
+    st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
 
-# --- 메인 앱 실행 ---
+    if not GEMINI_KEY:
+        st.error("⚠️ `.streamlit/secrets.toml`에 `gemini_key`가 설정되지 않았습니다.")
+        st.info("Google AI Studio에서 무료 API 키를 발급받으세요.")
+        return
+
+    # 채팅 기록 초기화
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "assistant", "content": "안녕하세요! 여행에 대해 무엇이든 물어보세요. ✈️"}
+        ]
+
+    # 기존 메시지 표시
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # 사용자 입력 처리
+    if prompt := st.chat_input("질문을 입력하세요 (예: 12월 도쿄 옷차림 알려줘)"):
+        # 사용자 메시지 표시
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # AI 응답 생성
+        with st.chat_message("assistant"):
+            with st.spinner("AI가 생각 중입니다..."):
+                try:
+                    # Gemini 모델 설정
+                    model = genai.GenerativeModel('gemini-pro')
+                    response = model.generate_content(prompt)
+                    ai_msg = response.text
+                    
+                    st.markdown(ai_msg)
+                    st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+                except Exception as e:
+                    st.error(f"오류가 발생했습니다: {e}")
+
+# --- 메인 실행 ---
 def main():
     st.set_page_config(page_title="Travel Planner AI", page_icon="✈️", layout="wide")
     check_api_keys()
     
     with st.sidebar:
         st.title("✈️ 여행 비서 AI")
-        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)"])
-        st.info("🌍 전 세계 도시 검색 지원\n(OpenStreetMap 기반)")
+        app_mode = st.radio("메뉴 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)"])
+        st.write("---")
         st.caption("Made with Streamlit")
 
     if app_mode == "개인 맞춤형 (Single)":
         run_mode_single_trip()
     elif app_mode == "장기 여행 (Long-term)":
         run_mode_long_trip()
+    elif app_mode == "AI 상담소 (Chat)":
+        run_mode_chat()
 
 if __name__ == "__main__":
     main()
