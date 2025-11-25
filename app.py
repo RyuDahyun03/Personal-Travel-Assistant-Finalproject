@@ -288,7 +288,9 @@ def run_mode_single_trip():
             if not top_3:
                 st.warning("추천 기간을 찾지 못했습니다."); st.stop()
 
+            # --- 결과 출력 ---
             st.divider()
+            
             st.info(f"🛂 **비자 정보 ({country_data['country']}):** {country_data['visa']}")
 
             st.subheader(f"🗺️ '{theme_name}' 추천 장소 ({country_key})")
@@ -310,10 +312,12 @@ def run_mode_single_trip():
                 rain_sum = period['window']['precipitation_sum'].sum()
                 free_days = period['window']['is_free_day'].sum()
                 
+                # [신규] 경비 계산
                 est_cost = calculate_travel_cost(country_key, trip_duration, travel_style)
                 
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
+                # 다운로드 텍스트 추가
                 download_text += f"[{i+1}순위] {p_start} ~ {p_end}\n"
                 download_text += f" - 예상 기온: {temp_avg:.1f}도 / 강수량: {rain_sum:.1f}mm\n"
                 download_text += f" - 예상 경비: 약 {est_cost:,}원 ({travel_style})\n\n"
