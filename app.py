@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import io
 import pydeck as pdk
 
-# --- 1. 전 세계 주요 도시 데이터 (경비/비자 정보) ---
+# --- 1. 전 세계 주요 도시 데이터 ---
 CITY_DATA = {
     # [동북아시아]
     "🇯🇵 일본 (도쿄)": {"code": "JP", "city": "Tokyo", "coords": "35.6895,139.6917", "country": "일본", "cost": 180000, "visa": "무비자 (90일)"},
@@ -95,33 +95,47 @@ def calculate_distance(coords1, coords2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
-# [수정] 지도 시각화 (map_style 제거)
+# [수정된 지도 시각화] 점(Scatterplot)과 텍스트(Text)로 지역 표시
 def draw_route_map(route_cities):
-    """PyDeck을 사용하여 지도 위에 이동 경로(Arc)를 그립니다."""
+    """PyDeck을 사용하여 지도 위에 방문할 도시를 점과 이름으로 표시합니다."""
     map_data = []
-    for i in range(len(route_cities) - 1):
-        start_city = CITY_DATA[route_cities[i]]
-        end_city = CITY_DATA[route_cities[i+1]]
-        
+    for i, city_key in enumerate(route_cities):
+        city_data = CITY_DATA[city_key]
         # PyDeck은 [경도, 위도] 순서
-        start_coords = list(map(float, start_city['coords'].split(',')))[::-1] 
-        end_coords = list(map(float, end_city['coords'].split(',')))[::-1]
+        coords = list(map(float, city_data['coords'].split(',')))[::-1]
         
         map_data.append({
-            "start": start_coords,
-            "end": end_coords,
-            "name": f"{route_cities[i]} -> {route_cities[i+1]}"
+            "coordinates": coords,
+            "name": f"{i+1}. {city_data['city']}", # 번호와 도시 이름
+            "size": 50000, # 점 크기 (미터 단위, 지도 줌 레벨에 따라 조절됨)
+            "color": [0, 200, 100, 200] # 초록색 점
         })
 
-    layer = pdk.Layer(
-        "ArcLayer",
+    # 1. 점 레이어 (도시 위치 표시)
+    scatter_layer = pdk.Layer(
+        "ScatterplotLayer",
         data=map_data,
-        get_source_position="start",
-        get_target_position="end",
-        get_source_color=[0, 255, 0, 160], # 초록색 라인
-        get_target_color=[255, 0, 0, 160], # 붉은색 라인 (도착지)
-        get_width=5,
-        get_tilt=15,
+        get_position="coordinates",
+        get_fill_color="color",
+        get_radius="size",
+        pickable=True,
+        radius_scale=1,
+        radius_min_pixels=10, # 최소 크기 보장
+        radius_max_pixels=30,
+    )
+
+    # 2. 텍스트 레이어 (도시 이름 표시)
+    text_layer = pdk.Layer(
+        "TextLayer",
+        data=map_data,
+        get_position="coordinates",
+        get_text="name",
+        get_size=20,
+        get_color=[0, 0, 0],
+        get_angle=0,
+        get_text_anchor="middle",
+        get_alignment_baseline="bottom",
+        pixel_offset=[0, -20] # 점 위에 글씨 표시
     )
 
     # 초기 뷰 설정 (첫 번째 도시 기준)
@@ -130,18 +144,16 @@ def draw_route_map(route_cities):
         latitude=first_city_coords[1],
         longitude=first_city_coords[0],
         zoom=3,
-        pitch=30,
+        pitch=0,
     )
 
-    # map_style을 None으로 설정하여 기본 스타일 사용 (API 키 불필요)
     st.pydeck_chart(pdk.Deck(
-        layers=[layer],
+        layers=[scatter_layer, text_layer],
         initial_view_state=view_state,
-        map_style=None, 
+        map_style=None,
         tooltip={"text": "{name}"}
     ))
 
-# 짐 싸기 조언 생성
 def get_packing_tips(avg_temp, rain_sum):
     tips = []
     if avg_temp < 5: tips.append("🧥 두꺼운 패딩/코트, 목도리, 장갑 (매우 추움)")
@@ -155,7 +167,6 @@ def get_packing_tips(avg_temp, rain_sum):
     if not tips: tips.append("평범한 여행 복장이면 충분합니다.")
     return "\n".join([f"- {t}" for t in tips])
 
-# 구글 플라이트 링크 생성
 def get_flight_link(destination_key):
     query_city = CITY_DATA[destination_key]['city']
     return f"https://www.google.com/travel/flights?q=Flights+to+{query_city}"
@@ -289,7 +300,6 @@ def run_mode_single_trip():
     with col2:
         theme_name = st.selectbox("여행 테마는?", options=THEME_OSM_MAP.keys())
 
-    # 여행 스타일 선택 (라디오 버튼)
     travel_style = st.radio(
         "여행 스타일 선택 (경비 계산용)",
         options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
@@ -376,15 +386,12 @@ def run_mode_single_trip():
                 rain_sum = period['window']['precipitation_sum'].sum()
                 free_days = period['window']['is_free_day'].sum()
                 
-                # 경비 계산
                 est_cost = calculate_travel_cost(country_key, trip_duration, travel_style)
                 
-                # 짐 싸기 조언
                 packing_tips = get_packing_tips(temp_avg, rain_sum)
                 
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
-                # 다운로드 텍스트 추가
                 download_text += f"[{i+1}순위] {p_start} ~ {p_end}\n"
                 download_text += f" - 예상 기온: {temp_avg:.1f}도 / 강수량: {rain_sum:.1f}mm\n"
                 download_text += f" - 준비물: {packing_tips.replace(chr(10), ', ')}\n"
@@ -398,11 +405,8 @@ def run_mode_single_trip():
                     c4.metric("예상 경비", f"{est_cost // 10000}만 원")
                     
                     st.caption(f"💰 {trip_duration}박 체류비 ({travel_style})")
-                    
-                    # 짐 싸기 정보 표시
                     st.info(f"🧳 **챙겨야 할 것들:**\n{packing_tips}")
                     
-                    # 항공권 링크 버튼
                     flight_url = get_flight_link(country_key)
                     st.link_button("✈️ 실시간 항공권 가격 확인하기 (Google Flights)", flight_url)
 
@@ -442,7 +446,6 @@ def run_mode_long_trip():
     with col2:
         total_weeks = st.slider("전체 여행 기간 (주)", 1, 12, 4)
     
-    # 여행 스타일 선택 (라디오 버튼)
     travel_style = st.radio(
         "여행 스타일 (전체 경비 계산용)",
         options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
@@ -472,7 +475,7 @@ def run_mode_long_trip():
         st.divider()
         st.subheader(f"🗺️ 추천 여행 루트 ({len(route)}개 도시, 총 {total_weeks}주)")
         
-        # 지도 시각화 (map_style 수정됨)
+        # [지도 시각화 수정] 선(Arc) 대신 점(Scatter)과 텍스트 표시
         draw_route_map(route)
         
         total_est_cost = 0
