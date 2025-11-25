@@ -48,7 +48,6 @@ def download_korean_font():
             f.write(r.content)
     return font_path
 
-# [수정] PDF 생성 함수 (파일 저장 방식 적용 - 안정성 강화)
 def create_pdf_report(title, content_list):
     pdf = FPDF()
     pdf.add_page()
@@ -166,15 +165,28 @@ def get_places_osm(lat, lon, osm_tag):
 
 # --- 4. 시각화 및 계산 ---
 
+# [수정] 지도 시각화 (선 색상 변경: 진회색)
 def draw_route_map(route_cities):
+    # 1. 점(Scatterplot) 및 텍스트 데이터 준비
     map_data = []
     for i, city in enumerate(route_cities):
         map_data.append({
-            "coordinates": [city['lon'], city['lat']],
+            "coordinates": [city['lon'], city['lat']], # PyDeck은 [경도, 위도] 순서
             "name": f"{i+1}. {city['name'].split(',')[0]}",
             "size": 50000, "color": [0, 200, 100, 200]
         })
     
+    # 2. 선(Line) 데이터 준비
+    line_data = []
+    for i in range(len(route_cities) - 1):
+        start_city = route_cities[i]
+        end_city = route_cities[i+1]
+        line_data.append({
+            "start_coords": [start_city['lon'], start_city['lat']],
+            "end_coords": [end_city['lon'], end_city['lat']]
+        })
+
+    # 레이어 정의
     scatter_layer = pdk.Layer(
         "ScatterplotLayer", data=map_data, get_position="coordinates",
         get_fill_color="color", get_radius="size", pickable=True,
@@ -182,13 +194,31 @@ def draw_route_map(route_cities):
     )
     text_layer = pdk.Layer(
         "TextLayer", data=map_data, get_position="coordinates",
-        get_text="name", get_size=20, get_color=[0, 0, 0],
+        get_text="name", get_size=18, get_color=[0, 0, 0],
         get_angle=0, get_text_anchor="middle", get_alignment_baseline="bottom",
-        pixel_offset=[0, -20]
+        pixel_offset=[0, -15]
     )
+    
+    # [색상 변경] 경로 선 레이어 (진회색)
+    line_layer = pdk.Layer(
+        "LineLayer",
+        data=line_data,
+        get_source_position="start_coords",
+        get_target_position="end_coords",
+        get_color=[80, 80, 80, 200], # [R, G, B, Alpha] -> 진회색
+        get_width=3, # 선 두께
+        pickable=False
+    )
+
     first_coords = [route_cities[0]['lon'], route_cities[0]['lat']]
     view_state = pdk.ViewState(latitude=first_coords[1], longitude=first_coords[0], zoom=3)
-    st.pydeck_chart(pdk.Deck(layers=[scatter_layer, text_layer], initial_view_state=view_state, map_style=None, tooltip={"text": "{name}"}))
+    
+    st.pydeck_chart(pdk.Deck(
+        layers=[line_layer, scatter_layer, text_layer], 
+        initial_view_state=view_state, 
+        map_style=None, 
+        tooltip={"text": "{name}"}
+    ))
 
 def create_base_dataframe(weather_json, start_date, end_date):
     if not weather_json or 'daily' not in weather_json: return pd.DataFrame()
@@ -433,14 +463,30 @@ def run_mode_chat():
         st.chat_message("user").markdown(prompt)
         with st.chat_message("assistant"):
             with st.spinner("생각 중..."):
-                import google.generativeai as genai
-                genai.configure(api_key=GEMINI_KEY)
-                try:
-                    model = genai.GenerativeModel('gemini-pro')
-                    res = model.generate_content(prompt)
-                    st.markdown(res.text)
-                    st.session_state.messages.append({"role": "assistant", "content": res.text})
-                except: st.error("오류 발생")
+                # 자동 복구 로직 (2.0 -> 2.5 -> 1.5 -> pro)
+                candidates = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-pro"]
+                success = False
+                current_date = datetime.now().strftime("%Y-%m-%d")
+                
+                for model_name in candidates:
+                    try:
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
+                        headers = {'Content-Type': 'application/json'}
+                        # 검색 도구 활성화
+                        data = {
+                            "contents": [{"parts": [{"text": f"System: Today is {current_date}. Use google search for latest info.\nUser: {prompt}"}]}],
+                            "tools": [{"google_search_retrieval": {}}]
+                        }
+                        resp = requests.post(url, headers=headers, json=data)
+                        if resp.status_code == 200:
+                            ai_msg = resp.json()['candidates'][0]['content']['parts'][0]['text']
+                            st.markdown(ai_msg)
+                            st.session_state.messages.append({"role": "assistant", "content": ai_msg})
+                            success = True
+                            break
+                    except: continue
+                
+                if not success: st.error("AI 연결 실패. 잠시 후 시도해주세요.")
 
 # --- 메인 실행 ---
 def main():
@@ -451,7 +497,6 @@ def main():
         st.title("✈️ 메뉴")
         app_mode = st.radio("모드 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)"])
         st.write("---")
-        # 환율 계산기 (위치 변경됨)
         st.subheader("💸 환율 계산기")
         rates = get_exchange_rates()
         if rates:
