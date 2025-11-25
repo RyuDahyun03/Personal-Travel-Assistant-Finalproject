@@ -1,4 +1,5 @@
 streamlit
 requests
 pandas
-google-generativeai
+pydeck
+google-generativeai>=0.8.3
