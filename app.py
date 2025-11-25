@@ -16,7 +16,40 @@ THEME_OSM_MAP = {
     "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# --- 1. API 키 확인 ---
+# --- 1. 내장 도시 데이터 (1차 방어선 - API 오류 방지용) ---
+FALLBACK_CITIES = {
+    "서울": {"lat": 37.5665, "lon": 126.9780, "country_code": "KR"},
+    "부산": {"lat": 35.1796, "lon": 129.0756, "country_code": "KR"},
+    "제주": {"lat": 33.4996, "lon": 126.5312, "country_code": "KR"},
+    "도쿄": {"lat": 35.6895, "lon": 139.6917, "country_code": "JP"},
+    "오사카": {"lat": 34.6937, "lon": 135.5023, "country_code": "JP"},
+    "후쿠오카": {"lat": 33.5904, "lon": 130.4017, "country_code": "JP"},
+    "삿포로": {"lat": 43.0618, "lon": 141.3545, "country_code": "JP"},
+    "방콕": {"lat": 13.7563, "lon": 100.5018, "country_code": "TH"},
+    "다낭": {"lat": 16.0544, "lon": 108.2022, "country_code": "VN"},
+    "하노이": {"lat": 21.0285, "lon": 105.8542, "country_code": "VN"},
+    "호치민": {"lat": 10.8231, "lon": 106.6297, "country_code": "VN"},
+    "나트랑": {"lat": 12.2388, "lon": 109.1967, "country_code": "VN"},
+    "타이베이": {"lat": 25.0330, "lon": 121.5654, "country_code": "TW"},
+    "싱가포르": {"lat": 1.3521, "lon": 103.8198, "country_code": "SG"},
+    "홍콩": {"lat": 22.3193, "lon": 114.1694, "country_code": "HK"},
+    "파리": {"lat": 48.8566, "lon": 2.3522, "country_code": "FR"},
+    "런던": {"lat": 51.5074, "lon": -0.1278, "country_code": "GB"},
+    "로마": {"lat": 41.9028, "lon": 12.4964, "country_code": "IT"},
+    "바르셀로나": {"lat": 41.3851, "lon": 2.1734, "country_code": "ES"},
+    "뉴욕": {"lat": 40.7128, "lon": -74.0060, "country_code": "US"},
+    "LA": {"lat": 34.0522, "lon": -118.2437, "country_code": "US"},
+    "샌프란시스코": {"lat": 37.7749, "lon": -122.4194, "country_code": "US"},
+    "시드니": {"lat": -33.8688, "lon": 151.2093, "country_code": "AU"},
+    "괌": {"lat": 13.4443, "lon": 144.7937, "country_code": "GU"},
+    "이스탄불": {"lat": 41.0082, "lon": 28.9784, "country_code": "TR"},
+    "프라하": {"lat": 50.0755, "lon": 14.4378, "country_code": "CZ"},
+    "비엔나": {"lat": 48.2082, "lon": 16.3738, "country_code": "AT"},
+    "부다페스트": {"lat": 47.4979, "lon": 19.0402, "country_code": "HU"},
+    "취리히": {"lat": 47.3769, "lon": 8.5417, "country_code": "CH"}
+}
+
+# --- 2. API 키 확인 ---
 CALENDARIFIC_KEY = st.secrets.get("calendarific_key")
 GEMINI_KEY = st.secrets.get("gemini_key")
 
@@ -25,7 +58,7 @@ def check_api_keys():
         st.sidebar.error("⚠️ Calendarific API 키가 설정되지 않았습니다.")
         st.stop()
 
-# --- 2. 유틸리티 함수 (환율, PDF, 거리, 검색) ---
+# --- 3. 유틸리티 함수 ---
 
 @st.cache_data(ttl=3600)
 def get_exchange_rates(base="KRW"):
@@ -48,27 +81,24 @@ def download_korean_font():
             f.write(r.content)
     return font_path
 
+# [수정] PDF 생성 함수 (안정성 강화)
 def create_pdf_report(title, content_list):
     pdf = FPDF()
     pdf.add_page()
     
-    # 폰트 설정
     font_path = download_korean_font()
     pdf.add_font('Nanum', '', font_path)
     pdf.set_font('Nanum', '', 12)
     
-    # 제목
     pdf.set_font('Nanum', '', 16)
     pdf.cell(0, 10, title, ln=True, align='C')
     pdf.ln(10)
     
-    # 내용
     pdf.set_font('Nanum', '', 10)
     for line in content_list:
         pdf.multi_cell(0, 8, line)
         pdf.ln(2)
     
-    # 임시 파일로 저장 후 바이트로 읽기 (오류 방지)
     temp_filename = "temp_report.pdf"
     pdf.output(temp_filename)
     
@@ -86,21 +116,27 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+# [핵심] 하이브리드 검색 함수
 @st.cache_data(ttl=3600)
 def search_city_coordinates(city_name):
-    """Nominatim API: 전 세계 도시 검색 (User-Agent 강화)"""
+    clean_name = city_name.strip().replace(" ", "")
+    # 1차: 내장 데이터 확인
+    if clean_name in FALLBACK_CITIES:
+        data = FALLBACK_CITIES[clean_name]
+        return {
+            "name": city_name,
+            "lat": data['lat'],
+            "lon": data['lon'],
+            "country_code": data['country_code']
+        }
+    # 2차: API 검색
     try:
         url = "https://nominatim.openstreetmap.org/search"
         params = {"q": city_name, "format": "json", "limit": 1, "accept-language": "ko"}
-        
-        # [수정] User-Agent를 고유하게 변경 (본인의 이메일을 넣거나 랜덤한 문자열 추가)
-        # 예: 'MyTravelApp/1.0 (myemail@example.com)'
-        headers = {'User-Agent': 'TravelPlanner_Student_Project/1.0'} 
-        
+        headers = {'User-Agent': 'MyTravelApp/1.0'}
         res = requests.get(url, params=params, headers=headers)
         res.raise_for_status()
         data = res.json()
-        
         if data:
             return {
                 "name": data[0]['display_name'],
@@ -109,12 +145,9 @@ def search_city_coordinates(city_name):
                 "country_code": data[0].get('address', {}).get('country_code', 'KR').upper() 
             }
         return None
-    except Exception as e:
-        # 에러 발생 시 로그 출력 (디버깅용)
-        st.error(f"검색 중 오류 발생: {e}")
-        return None
+    except: return None
 
-# --- 3. 데이터 API 함수 ---
+# --- 4. 데이터 API 함수 ---
 
 @st.cache_data(ttl=3600)
 def get_holidays_for_period(api_key, country_code, start_date, end_date):
@@ -172,30 +205,18 @@ def get_places_osm(lat, lon, osm_tag):
         return pd.DataFrame(places)
     except: return pd.DataFrame()
 
-# --- 4. 시각화 및 계산 ---
+# --- 5. 시각화 및 계산 ---
 
-# [수정] 지도 시각화 (선 색상 변경: 진회색)
+# [수정] 지도 선 색상 변경 (진회색)
 def draw_route_map(route_cities):
-    # 1. 점(Scatterplot) 및 텍스트 데이터 준비
     map_data = []
     for i, city in enumerate(route_cities):
         map_data.append({
-            "coordinates": [city['lon'], city['lat']], # PyDeck은 [경도, 위도] 순서
+            "coordinates": [city['lon'], city['lat']],
             "name": f"{i+1}. {city['name'].split(',')[0]}",
             "size": 50000, "color": [0, 200, 100, 200]
         })
     
-    # 2. 선(Line) 데이터 준비
-    line_data = []
-    for i in range(len(route_cities) - 1):
-        start_city = route_cities[i]
-        end_city = route_cities[i+1]
-        line_data.append({
-            "start_coords": [start_city['lon'], start_city['lat']],
-            "end_coords": [end_city['lon'], end_city['lat']]
-        })
-
-    # 레이어 정의
     scatter_layer = pdk.Layer(
         "ScatterplotLayer", data=map_data, get_position="coordinates",
         get_fill_color="color", get_radius="size", pickable=True,
@@ -205,29 +226,32 @@ def draw_route_map(route_cities):
         "TextLayer", data=map_data, get_position="coordinates",
         get_text="name", get_size=18, get_color=[0, 0, 0],
         get_angle=0, get_text_anchor="middle", get_alignment_baseline="bottom",
-        pixel_offset=[0, -15]
+        pixel_offset=[0, -20]
     )
     
-    # [색상 변경] 경로 선 레이어 (진회색)
+    line_data = []
+    for i in range(len(route_cities) - 1):
+        start = route_cities[i]
+        end = route_cities[i+1]
+        line_data.append({
+            "start_coords": [start['lon'], start['lat']],
+            "end_coords": [end['lon'], end['lat']]
+        })
+        
     line_layer = pdk.Layer(
         "LineLayer",
         data=line_data,
         get_source_position="start_coords",
         get_target_position="end_coords",
-        get_color=[80, 80, 80, 200], # [R, G, B, Alpha] -> 진회색
-        get_width=3, # 선 두께
+        get_color=[80, 80, 80, 200], # 진회색
+        get_width=3,
         pickable=False
     )
 
     first_coords = [route_cities[0]['lon'], route_cities[0]['lat']]
     view_state = pdk.ViewState(latitude=first_coords[1], longitude=first_coords[0], zoom=3)
     
-    st.pydeck_chart(pdk.Deck(
-        layers=[line_layer, scatter_layer, text_layer], 
-        initial_view_state=view_state, 
-        map_style=None, 
-        tooltip={"text": "{name}"}
-    ))
+    st.pydeck_chart(pdk.Deck(layers=[line_layer, scatter_layer, text_layer], initial_view_state=view_state, map_style=None, tooltip={"text": "{name}"}))
 
 def create_base_dataframe(weather_json, start_date, end_date):
     if not weather_json or 'daily' not in weather_json: return pd.DataFrame()
@@ -387,83 +411,7 @@ def run_mode_long_trip():
 
     if st.session_state['selected_cities_data']:
         st.write("### 📋 선택 목록")
-        for i, c in enumerate(st.session_state['selected_cities_data']): st.text(f"{i+1}. {c['name']}")
-        if st.button("초기화 🗑️"): st.session_state['selected_cities_data'] = []; st.rerun()
-    else: st.info("도시를 추가해주세요."); return
-
-    st.write("---")
-    if len(st.session_state['selected_cities_data']) > 0:
-        start_city_name = st.selectbox("출발 도시", [c['name'] for c in st.session_state['selected_cities_data']])
-        start_city = next(c for c in st.session_state['selected_cities_data'] if c['name'] == start_city_name)
-    
-    col1, col2 = st.columns(2)
-    with col1: start_date = st.date_input("시작일", value=datetime.now().date()+timedelta(30))
-    with col2: total_weeks = st.slider("기간 (주)", 1, 24, 4)
-    
-    daily_budget = st.number_input("1일 평균 예산 (원)", value=150000)
-    travel_style = st.radio("스타일", ["배낭여행", "일반", "럭셔리"], horizontal=True)
-
-    if st.button("🚀 루트 최적화", type="primary"):
-        cities = st.session_state['selected_cities_data']
-        if len(cities) < 2: st.warning("2개 이상 필요"); st.stop()
-
-        # 루트 최적화
-        route = [start_city]
-        unvisited = [c for c in cities if c['name'] != start_city['name']]
-        curr = start_city
-        while unvisited:
-            nearest = min(unvisited, key=lambda x: calculate_distance(curr['lat'], curr['lon'], x['lat'], x['lon']))
-            route.append(nearest)
-            unvisited.remove(nearest)
-            curr = nearest
-
-        total_days = total_weeks * 7
-        days_per = max(2, total_days // len(route))
-        
-        st.divider()
-        st.subheader(f"🗺️ 추천 루트 ({len(route)}도시)")
-        draw_route_map(route)
-        
-        total_cost = calculate_travel_cost(daily_budget, total_days, travel_style)
-        st.metric("총 예상 경비 (항공권 제외)", f"약 {total_cost//10000}만 원")
-
-        st.write("---")
-        st.subheader("📅 상세 일정")
-        curr_date = start_date
-        pdf_lines = ["=== 세계일주 루트 ===", ""]
-        
-        for idx, city in enumerate(route):
-            stay = (start_date + timedelta(total_days) - curr_date).days if idx == len(route)-1 else days_per
-            arrival, departure = curr_date, curr_date + timedelta(stay)
-            
-            h_start, h_end = arrival - pd.DateOffset(years=1), departure - pd.DateOffset(years=1)
-            with st.spinner(f"{city['name'].split(',')[0]} 분석..."):
-                w = get_historical_weather(city['lat'], city['lon'], h_start.strftime('%Y-%m-%d'), h_end.strftime('%Y-%m-%d'))
-                df = create_base_dataframe(w, h_start, h_end)
-            
-            w_desc = "데이터 없음"
-            if not df.empty:
-                t = df['temperature_2m_max'].mean()
-                w_desc = f"{t:.1f}°C ({'쾌적' if 15<=t<=25 else '더움' if t>28 else '추움'})"
-
-            simple_name = city['name'].split(',')[0]
-            line_str = f"{idx+1}. {simple_name}: {arrival}~{departure} ({stay}박) / {w_desc}"
-            pdf_lines.append(line_str)
-
-            with st.container(border=True):
-                st.markdown(f"**{idx+1}. {simple_name}**")
-                c1, c2, c3 = st.columns([2,2,1])
-                c1.write(f"{arrival.strftime('%m/%d')}~{departure.strftime('%m/%d')}")
-                c2.write(f"🌡️ {w_desc}")
-                c3.link_button("📍 지도", f"https://www.google.com/maps/search/?api=1&query={city['lat']},{city['lon']}")
-            curr_date = departure
-
-        pdf_bytes = create_pdf_report(f"Long Trip Plan ({total_weeks} Weeks)", pdf_lines)
-        st.download_button("📥 PDF 다운로드", data=pdf_bytes, file_name="LongTrip.pdf", mime="application/pdf")
-
-# --- 모드 3: AI 챗봇 ---
-def run_mode_chat():
-    st.header("🤖 AI 여행 플래너")
+        for i, c in enumerate(st.session_state['selected_c너")
     if not GEMINI_KEY: st.error("API 키 없음"); return
     if "messages" not in st.session_state: st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! ✈️"}]
     for msg in st.session_state.messages: st.chat_message(msg["role"]).markdown(msg["content"])
@@ -472,39 +420,13 @@ def run_mode_chat():
         st.chat_message("user").markdown(prompt)
         with st.chat_message("assistant"):
             with st.spinner("생각 중..."):
-                # 자동 복구 로직 (2.0 -> 2.5 -> 1.5 -> pro)
                 candidates = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-pro"]
                 success = False
                 current_date = datetime.now().strftime("%Y-%m-%d")
                 
                 for model_name in candidates:
                     try:
-                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_KEY}"
-                        headers = {'Content-Type': 'application/json'}
-                        # 검색 도구 활성화
-                        data = {
-                            "contents": [{"parts": [{"text": f"System: Today is {current_date}. Use google search for latest info.\nUser: {prompt}"}]}],
-                            "tools": [{"google_search_retrieval": {}}]
-                        }
-                        resp = requests.post(url, headers=headers, json=data)
-                        if resp.status_code == 200:
-                            ai_msg = resp.json()['candidates'][0]['content']['parts'][0]['text']
-                            st.markdown(ai_msg)
-                            st.session_state.messages.append({"role": "assistant", "content": ai_msg})
-                            success = True
-                            break
-                    except: continue
-                
-                if not success: st.error("AI 연결 실패. 잠시 후 시도해주세요.")
-
-# --- 메인 실행 ---
-def main():
-    st.set_page_config(page_title="Travel Planner AI", page_icon="✈️", layout="wide")
-    check_api_keys()
-    
-    with st.sidebar:
-        st.title("✈️ 메뉴")
-        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Short-term)", "장기 여행 (Long-term)", "AI 여행 플래너"])
+                        url = f"https:너"])
         st.write("---")
         st.subheader("💸 환율 계산기")
         rates = get_exchange_rates()
