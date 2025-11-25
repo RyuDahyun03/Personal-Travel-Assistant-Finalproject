@@ -5,7 +5,7 @@ import math
 from datetime import datetime, timedelta
 import io
 
-# --- 1. 전 세계 주요 도시 데이터 (경비/비자 정보 추가) ---
+# --- 1. 전 세계 주요 도시 데이터 (경비/비자 정보) ---
 # 비용: 1인 1일 기준 (숙박+식비+교통) - 일반 여행객 기준 (KRW)
 # 비자: 한국 여권 소지자 기준
 CITY_DATA = {
@@ -199,7 +199,6 @@ def calculate_travel_cost(city_key, days, style):
     return int(total_cost)
 
 def generate_download_content(title, details_text):
-    """다운로드용 텍스트 생성"""
     return f"""
     ==========================================
     ✈️ 여행 비서 AI - 추천 일정 리포트
@@ -226,11 +225,12 @@ def run_mode_single_trip():
     with col2:
         theme_name = st.selectbox("여행 테마는?", options=THEME_OSM_MAP.keys())
 
-    # [신규] 여행 스타일 선택 (경비 계산용)
-    travel_style = st.select_slider(
-        "여행 스타일을 선택하세요 (경비 계산용)",
+    # [수정] 여행 스타일 선택 (라디오 버튼)
+    travel_style = st.radio(
+        "여행 스타일 선택 (경비 계산용)",
         options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
-        value="일반 (표준)"
+        index=1,
+        horizontal=True
     )
 
     priority_mode = st.radio(
@@ -288,10 +288,7 @@ def run_mode_single_trip():
             if not top_3:
                 st.warning("추천 기간을 찾지 못했습니다."); st.stop()
 
-            # --- 결과 출력 ---
             st.divider()
-            
-            # [신규] 비자 정보 표시
             st.info(f"🛂 **비자 정보 ({country_data['country']}):** {country_data['visa']}")
 
             st.subheader(f"🗺️ '{theme_name}' 추천 장소 ({country_key})")
@@ -303,7 +300,7 @@ def run_mode_single_trip():
             st.write("---")
             st.subheader(f"🏆 추천 여행 기간 Best 3")
             
-            download_text = "" # 다운로드용 텍스트 버퍼
+            download_text = ""
 
             for i, period in enumerate(top_3):
                 p_start = period['start'].strftime('%Y-%m-%d')
@@ -313,12 +310,10 @@ def run_mode_single_trip():
                 rain_sum = period['window']['precipitation_sum'].sum()
                 free_days = period['window']['is_free_day'].sum()
                 
-                # [신규] 경비 계산
                 est_cost = calculate_travel_cost(country_key, trip_duration, travel_style)
                 
                 medal = ["🥇", "🥈", "🥉"][i] if i < 3 else ""
                 
-                # 다운로드 텍스트 추가
                 download_text += f"[{i+1}순위] {p_start} ~ {p_end}\n"
                 download_text += f" - 예상 기온: {temp_avg:.1f}도 / 강수량: {rain_sum:.1f}mm\n"
                 download_text += f" - 예상 경비: 약 {est_cost:,}원 ({travel_style})\n\n"
@@ -328,7 +323,6 @@ def run_mode_single_trip():
                     c1.metric("예상 기온", f"{temp_avg:.1f}°C")
                     c2.metric("예상 강수", f"{rain_sum:.1f}mm")
                     c3.metric("휴일 포함", f"{free_days}일")
-                    # [신규] 경비 표시
                     c4.metric("예상 경비", f"{est_cost // 10000}만 원")
                     
                     st.caption(f"💰 항공권을 제외한 {trip_duration}박 체류비 ({travel_style} 기준)")
@@ -336,7 +330,6 @@ def run_mode_single_trip():
                     elif temp_avg < 5: st.caption("🥶 추운 날씨 대비 필요")
                     elif 15 <= temp_avg <= 25: st.caption("🌿 여행하기 최적의 날씨!")
 
-            # [신규] 일정 저장 버튼
             st.download_button(
                 label="📥 추천 일정 저장하기 (TXT)",
                 data=generate_download_content(f"{country_key} 여행 추천 ({trip_duration}박)", download_text),
@@ -373,11 +366,12 @@ def run_mode_long_trip():
     with col2:
         total_weeks = st.slider("전체 여행 기간 (주)", 1, 12, 4)
     
-    # [신규] 스타일 선택
-    travel_style = st.select_slider(
+    # [수정] 여행 스타일 선택 (라디오 버튼)
+    travel_style = st.radio(
         "여행 스타일 (전체 경비 계산용)",
         options=["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"],
-        value="배낭여행 (절약)"
+        index=0,
+        horizontal=True
     )
 
     total_days = total_weeks * 7
@@ -386,7 +380,6 @@ def run_mode_long_trip():
         if len(selected_cities) < 2:
             st.warning("루트를 짜려면 2개 이상의 도시가 필요합니다."); st.stop()
 
-        # 루트 최적화 (Greedy)
         route = [start_city]
         unvisited = [c for c in selected_cities if c != start_city]
         current_city = start_city
@@ -403,14 +396,11 @@ def run_mode_long_trip():
         st.divider()
         st.subheader(f"🗺️ 추천 여행 루트 ({len(route)}개 도시, 총 {total_weeks}주)")
         
-        # [신규] 전체 요약 (총 경비, 비자)
         total_est_cost = 0
         visa_summary = set()
         download_text = "[[ 추천 루트 ]]\n"
 
-        # 루트 계산 및 미리보기
         for city in route:
-            # 마지막 도시는 잔여일 계산, 나머지는 균등분배
             if city == route[-1]:
                 stay = total_days - (days_per_city * (len(route)-1))
             else:
@@ -419,7 +409,6 @@ def run_mode_long_trip():
             cost = calculate_travel_cost(city, stay, travel_style)
             total_est_cost += cost
             visa_summary.add(f"{CITY_DATA[city]['country']}: {CITY_DATA[city]['visa']}")
-            
             download_text += f" -> {city} ({stay}박)\n"
 
         c1, c2 = st.columns(2)
@@ -471,7 +460,6 @@ def run_mode_long_trip():
 
             current_date = departure_date
 
-        # [신규] 장기 여행 일정 저장
         st.download_button(
             label="📥 전체 루트 저장하기 (TXT)",
             data=generate_download_content(f"장기 여행 루트 ({len(route)}개 도시)", download_text),
