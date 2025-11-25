@@ -207,6 +207,7 @@ def draw_route_map(route_cities):
     map_data = []
     for i, city_key in enumerate(route_cities):
         city_data = CITY_DATA[city_key]
+        # PyDeck은 [경도, 위도] 순서
         coords = list(map(float, city_data['coords'].split(',')))[::-1]
         map_data.append({
             "coordinates": coords,
@@ -214,17 +215,20 @@ def draw_route_map(route_cities):
             "size": 50000, "color": [0, 200, 100, 200]
         })
     
+    # 1. 점 레이어
     scatter_layer = pdk.Layer(
         "ScatterplotLayer", data=map_data, get_position="coordinates",
         get_fill_color="color", get_radius="size", pickable=True,
         radius_scale=1, radius_min_pixels=10, radius_max_pixels=30
     )
+    # 2. 텍스트 레이어
     text_layer = pdk.Layer(
         "TextLayer", data=map_data, get_position="coordinates",
         get_text="name", get_size=20, get_color=[0, 0, 0],
         get_angle=0, get_text_anchor="middle", get_alignment_baseline="bottom",
         pixel_offset=[0, -20]
     )
+    # 초기 뷰 설정
     first_coords = list(map(float, CITY_DATA[route_cities[0]]['coords'].split(',')))[::-1]
     view_state = pdk.ViewState(latitude=first_coords[1], longitude=first_coords[0], zoom=3)
     
@@ -287,10 +291,12 @@ def run_mode_single_trip():
     
     col1, col2 = st.columns(2)
     with col1:
+        # [신규] 검색 기능 활성화된 selectbox
         country_key = st.selectbox("어디로 떠날까요? (도시 검색)", options=CITY_DATA.keys())
     with col2:
         theme_name = st.selectbox("여행 테마", options=THEME_OSM_MAP.keys())
 
+    # [신규] 라디오 버튼 스타일
     travel_style = st.radio("여행 스타일 (경비용)", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], index=1, horizontal=True)
     priority_mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
 
@@ -457,65 +463,37 @@ def run_mode_long_trip():
 
         st.download_button("📥 다운로드", generate_download_content("세계일주", dl_text), "LongTrip.txt")
 
-# --- 모드 3: AI 챗봇 (자동 복구 기능 포함) ---
+# --- 모드 3: AI 챗봇 (자동 복구 기능 탑재) ---
 def run_mode_chat():
     st.header("🤖 AI 여행 상담소")
     st.caption("여행 계획, 맛집 추천, 현지 문화 등 무엇이든 물어보세요! (Google Gemini 기반)")
 
     if not GEMINI_KEY:
         st.error("⚠️ `.streamlit/secrets.toml`에 `gemini_key`가 설정되지 않았습니다.")
-        st.info("Google AI Studio에서 무료 API 키를 발급받으세요.")
         return
-    
-    # 사이드바에 모델 확인용 버튼 추가
-    with st.sidebar:
-        st.divider()
-        if st.button("🛠️ API 연결 테스트"):
-            try:
-                # 간단한 헬스 체크 (GET)
-                test_url = f"https://generativelanguage.googleapis.com/v1beta/models?key={GEMINI_KEY}"
-                resp = requests.get(test_url)
-                if resp.status_code == 200:
-                    st.success("API 연결 성공! ✅")
-                    models = resp.json().get('models', [])
-                    model_names = [m['name'] for m in models if 'generateContent' in m['supportedGenerationMethods']]
-                    st.json(model_names) # 사용 가능한 모델 목록 표시
-                else:
-                    st.error(f"API 연결 실패: {resp.status_code}")
-            except Exception as e:
-                st.error(f"테스트 중 오류: {e}")
 
-    # 채팅 기록 초기화
     if "messages" not in st.session_state:
-        st.session_state.messages = [
-            {"role": "assistant", "content": "안녕하세요! 여행에 대해 무엇이든 물어보세요. ✈️"}
-        ]
+        st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! 여행에 대해 무엇이든 물어보세요. ✈️"}]
 
-    # 기존 메시지 표시
     for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
+        with st.chat_message(msg["role"]): st.markdown(msg["content"])
 
-    # 사용자 입력 처리
     if prompt := st.chat_input("질문을 입력하세요 (예: 12월 도쿄 옷차림 알려줘)"):
-        # 사용자 메시지 표시
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        with st.chat_message("user"): st.markdown(prompt)
 
-        # AI 응답 생성
         with st.chat_message("assistant"):
             with st.spinner("AI가 생각 중입니다..."):
-                success = False
-                error_msg = ""
-                
-                # [자동 복구] 사용 가능한 모델 순차 시도
-                # gemini-1.5-flash (최신, 빠름) -> gemini-pro (구형, 안정적) -> gemini-1.0-pro
+                # [자동 복구] 사용 가능한 모델 리스트 (우선순위 순서)
                 candidates = [
-                    "gemini-1.5-flash", 
-                    "gemini-pro",
-                    "gemini-1.0-pro"
+                    "gemini-2.0-flash", # 1순위: 사용자 목록에 있던 최신 모델
+                    "gemini-1.5-flash", # 2순위: 일반적인 표준 모델
+                    "gemini-pro",       # 3순위: 가장 안정적인 구형 모델
+                    "gemini-1.0-pro"    # 4순위: 최후의 수단
                 ]
+                
+                success = False
+                last_error = ""
                 
                 for model_name in candidates:
                     try:
@@ -532,18 +510,18 @@ def run_mode_chat():
                             st.markdown(ai_msg)
                             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                             success = True
-                            break # 성공하면 루프 탈출
+                            break # 성공하면 루프 탈출!
                         else:
                             # 404 등 오류 발생 시 다음 모델 시도
-                            error_msg = f"{response.status_code} - {response.text}"
+                            last_error = f"{response.status_code} ({model_name})"
                             continue
                     except Exception as e:
-                        error_msg = str(e)
+                        last_error = str(e)
                         continue
                 
                 if not success:
-                    st.error(f"모든 모델 연결에 실패했습니다. (마지막 오류: {error_msg})")
-                    st.info("잠시 후 다시 시도하거나, 사이드바의 'API 연결 테스트'를 확인해보세요.")
+                    st.error(f"모든 모델 연결 실패 😢 (마지막 오류: {last_error})")
+                    st.info("잠시 후 다시 시도하거나 API 키를 확인해주세요.")
 
 # --- 메인 실행 ---
 def main():
