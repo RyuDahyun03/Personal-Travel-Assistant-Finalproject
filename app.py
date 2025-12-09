@@ -10,7 +10,7 @@ import time
 from PIL import Image, ImageDraw, ImageFont
 import base64
 from io import BytesIO
-import json # 최상단 import 모음에 이 줄이 없다면 추가해주세요
+import json
 
 # --- 설정: 테마 매핑 ---
 THEME_OSM_MAP = {
@@ -19,7 +19,6 @@ THEME_OSM_MAP = {
     "문화/유적 🏯": '"tourism"="attraction"',
     "휴양/공원 🌳": '"leisure"="park"'
 }
-
 
 # --- 2. API 키 확인 ---
 CALENDARIFIC_KEY = st.secrets.get("calendarific_key")
@@ -34,7 +33,6 @@ def check_api_keys():
         st.stop()
 
 # --- 3. 유틸리티 함수 ---
-
 @st.cache_data(ttl=3600)
 def get_exchange_rates(base="KRW"):
     try:
@@ -81,12 +79,25 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+# --- 1. 내장 도시 데이터 (JSON 파일 로드) ---
+@st.cache_data
+def load_fallback_cities():
+    file_path = "city_coordinates.json"
+    if not os.path.exists(file_path):
+        return {} 
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+FALLBACK_CITIES = load_fallback_cities()
+
 @st.cache_data(ttl=3600)
 def search_city_coordinates(city_name):
     clean_name = city_name.strip().replace(" ", "")
+    # JSON 파일에서 먼저 검색
     if clean_name in FALLBACK_CITIES:
         data = FALLBACK_CITIES[clean_name]
         return {"name": city_name, "lat": data['lat'], "lon": data['lon'], "country_code": data['code']}
+    # 없으면 OSM API 검색
     try:
         url = "https://nominatim.openstreetmap.org/search"
         params = {"q": city_name, "format": "json", "limit": 1, "accept-language": "ko"}
@@ -98,10 +109,6 @@ def search_city_coordinates(city_name):
             return {"name": data[0]['display_name'], "lat": float(data[0]['lat']), "lon": float(data[0]['lon']), "country_code": data[0].get('address', {}).get('country_code', 'KR').upper()}
         return None
     except: return None
-
-
-
-
 
 # --- API 함수들 ---
 @st.cache_data(ttl=3600)
@@ -202,18 +209,28 @@ def draw_route_map(route_cities):
     st.pydeck_chart(pdk.Deck(layers=[line_layer, scatter_layer, text_layer], initial_view_state=view_state, map_style=None, tooltip={"text": "{name}"}))
 
 # --- 실행 함수들 ---
+
+# [수정됨] 단기 여행: 엔터 검색 및 입력창 초기화 적용
 def run_mode_single_trip():
     st.header("🎯 개인 맞춤형 여행 추천")
-    c1, c2 = st.columns([2, 1])
-    with c1: city_query = st.text_input("✈️ 어디로 떠나시나요?", placeholder="도시명 (예: 파리, 도쿄)")
-    with c2: 
-        st.write(""); st.write("")
-        search_btn = st.button("도시 검색 🔍")
+
+    # 콜백 함수: 검색 실행 및 입력창 초기화
+    def handle_search():
+        query = st.session_state.single_city_input
+        if query:
+            with st.spinner("위치 확인 중..."):
+                st.session_state.search_result = search_city_coordinates(query)
+            st.session_state.single_city_input = ""  # 입력창 초기화
 
     if "search_result" not in st.session_state: st.session_state.search_result = None
-    if search_btn and city_query:
-        with st.spinner("위치 확인 중..."):
-            st.session_state.search_result = search_city_coordinates(city_query)
+
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom") # 버튼 정렬 맞춤
+    with c1: 
+        # on_change로 엔터 입력 시 검색 실행
+        st.text_input("✈️ 어디로 떠나시나요?", placeholder="도시명 (예: 파리, 도쿄) 입력 후 Enter", key="single_city_input", on_change=handle_search)
+    with c2: 
+        # 버튼 클릭 시에도 동일한 로직 실행
+        st.button("도시 검색 🔍", on_click=handle_search, use_container_width=True)
 
     if st.session_state.search_result:
         city_data = st.session_state.search_result
@@ -277,20 +294,32 @@ def run_mode_single_trip():
                 p_bytes = create_pdf_report(f"Travel Plan: {city_data['name'].split(',')[0]}", pdf_list)
                 st.download_button("📄 PDF 다운로드", p_bytes, "Trip.pdf", "application/pdf")
 
+# [수정됨] 장기 여행: 엔터 추가 및 입력창 초기화 적용
 def run_mode_long_trip():
     st.header("🌏 장기 여행 (루트 최적화)")
     if 'selected_cities_data' not in st.session_state: st.session_state['selected_cities_data'] = []
-    c1, c2 = st.columns([3, 1])
-    with c1: new_city = st.text_input("도시 검색 (예: 런던)", key="multi_input")
-    with c2: 
-        st.write(""); st.write("")
-        if st.button("추가 ➕") and new_city:
+
+    # 콜백 함수: 도시 추가 및 입력창 초기화
+    def handle_add_city():
+        new_city = st.session_state.multi_input_key
+        if new_city:
             with st.spinner("찾는 중..."):
                 found = search_city_coordinates(new_city)
                 if found:
-                    if any(c['name'] == found['name'] for c in st.session_state['selected_cities_data']): st.warning("중복")
-                    else: st.session_state['selected_cities_data'].append(found); st.success(f"✅ {found['name'].split(',')[0]} 추가")
-                else: st.error("도시 없음")
+                    if any(c['name'] == found['name'] for c in st.session_state['selected_cities_data']):
+                        st.toast("⚠️ 이미 추가된 도시입니다.") # 경고를 toast로 변경하여 UI 유지
+                    else:
+                        st.session_state['selected_cities_data'].append(found)
+                        st.toast(f"✅ {found['name'].split(',')[0]} 추가 완료!")
+                else:
+                    st.toast("❌ 도시를 찾을 수 없습니다.")
+            st.session_state.multi_input_key = "" # 입력창 초기화
+
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
+    with c1: 
+        st.text_input("도시 검색 (예: 런던, 파리) 입력 후 Enter", key="multi_input_key", on_change=handle_add_city)
+    with c2: 
+        st.button("추가 ➕", on_click=handle_add_city, use_container_width=True)
     
     if st.session_state['selected_cities_data']:
         st.write("### 📋 선택 목록")
@@ -390,17 +419,6 @@ def run_mode_chat():
                     except: continue
                 if not success: st.error("AI 연결 실패")
 
-# --- 1. 내장 도시 데이터 (JSON 파일 로드) ---
-@st.cache_data
-def load_fallback_cities():
-    file_path = "city_coordinates.json"
-    if not os.path.exists(file_path):
-        return {} # 파일이 없으면 빈 딕셔너리 반환
-    with open(file_path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-FALLBACK_CITIES = load_fallback_cities()
-
 # --- 메인 실행 ---
 def main():
     st.set_page_config(page_title="Travel Planner AI", page_icon="✈️", layout="wide")
@@ -419,7 +437,6 @@ def main():
     if app_mode == "개인 맞춤형 (Single)": run_mode_single_trip()
     elif app_mode == "장기 여행 (Long-term)": run_mode_long_trip()
     elif app_mode == "AI 상담소 (Chat)": run_mode_chat()
-
 
 if __name__ == "__main__":
     main()
