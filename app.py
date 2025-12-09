@@ -417,7 +417,7 @@ def run_mode_long_trip():
         st.download_button("📥 PDF 다운로드", p_bytes, "LongTrip.pdf", "application/pdf")
 
 def run_mode_chat():
-    st.header("🤖 AI Travel Planner")
+    st.header("🤖 AI Travel Consultant")
     if not GEMINI_KEY: st.error("API 키 없음"); return
     if "messages" not in st.session_state: st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! ✈️"}]
     for msg in st.session_state.messages: st.chat_message(msg["role"]).markdown(msg["content"])
@@ -457,7 +457,7 @@ def main():
     check_api_keys()
     with st.sidebar:
         st.title("✈️ 메뉴")
-        app_mode = st.radio("모드 선택", ["Short-Term", "Long-Term", "AI Travel Planner"])
+        app_mode = st.radio("모드 선택", ["Short-Term", "Long-Term", "AI Travel Consultant"])
         st.write("---")
         st.subheader("💸 환율 계산기")
         rates = get_exchange_rates()
@@ -468,7 +468,7 @@ def main():
     
     if app_mode == "Short-Term": run_mode_single_trip()
     elif app_mode == "Long-Term": run_mode_long_trip()
-    elif app_mode == "AI Travel Planner": run_mode_chat()
+    elif app_mode == "AI Travel Consultant": run_mode_chat()
 
 if __name__ == "__main__":
     main()
