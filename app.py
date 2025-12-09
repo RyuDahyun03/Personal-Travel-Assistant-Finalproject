@@ -7,7 +7,7 @@ import pydeck as pdk
 from fpdf import FPDF
 import os
 import time
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import base64
 from io import BytesIO
 
@@ -19,7 +19,7 @@ THEME_OSM_MAP = {
     "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# --- 1. 내장 도시 데이터 ---
+# --- 1. 내장 도시 데이터 (1차 방어선 - API 오류 방지용) ---
 FALLBACK_CITIES = {
     "서울": {"lat": 37.5665, "lon": 126.9780, "code": "KR", "country": "한국"},
     "제주": {"lat": 33.4996, "lon": 126.5312, "code": "KR", "country": "한국"},
@@ -189,13 +189,12 @@ def search_city_coordinates(city_name):
         return None
     except: return None
 
-# [수정] 다중 이미지 통합 및 색상 추출 (입력값을 파일 리스트로 받아서 처리)
+# [다중 이미지 색상 추출]
 def extract_colors_from_multiple(uploaded_files, num_colors=4):
     if not uploaded_files: return []
     
     resized_images = []
     for uploaded_file in uploaded_files:
-        # 파일 포인터를 처음으로 되돌리기 (중요!)
         uploaded_file.seek(0)
         img = Image.open(uploaded_file).convert('RGB')
         img.thumbnail((150, 150))
@@ -205,7 +204,6 @@ def extract_colors_from_multiple(uploaded_files, num_colors=4):
 
     total_width = sum(img.width for img in resized_images)
     max_height = max(img.height for img in resized_images)
-    
     combined_image = Image.new('RGB', (total_width, max_height))
     
     x_offset = 0
@@ -216,11 +214,9 @@ def extract_colors_from_multiple(uploaded_files, num_colors=4):
     result = combined_image.convert('P', palette=Image.ADAPTIVE, colors=num_colors)
     result = result.convert('RGB')
     main_colors = result.getcolors(total_width * max_height)
-    
     if main_colors:
         main_colors.sort(key=lambda x: x[0], reverse=True)
-        colors = [color[1] for color in main_colors]
-        return colors
+        return [color[1] for color in main_colors]
     return []
 
 def display_color_palette(colors):
@@ -231,23 +227,53 @@ def display_color_palette(colors):
     html_code += '</div>'
     st.markdown(html_code, unsafe_allow_html=True)
 
-# [수정] 이미지 생성 (Pollinations AI 사용) - 프롬프트 강화
-def generate_landmark_image(city_name, colors):
+# [신규] 여행 기록 카드 생성 함수
+def create_memory_card(image_file, city_name, date_str, colors):
+    # 1. 캔버스 준비 (흰색 배경 폴라로이드 스타일)
+    card_width, card_height = 600, 800
+    card = Image.new('RGB', (card_width, card_height), 'white')
+    draw = ImageDraw.Draw(card)
+    
+    # 2. 사용자 이미지 로드
+    user_img = Image.open(image_file).convert('RGB')
+    
+    # 이미지 비율 유지하며 맞추기 (여백 40px)
+    target_width = card_width - 80
+    ratio = target_width / user_img.width
+    target_height = int(user_img.height * ratio)
+    
+    # 세로로 너무 길면 자르기
+    if target_height > 550: 
+        target_height = 550
+        user_img = user_img.resize((target_width, target_height)) # 단순 리사이즈 (크롭X)
+    else:
+        user_img = user_img.resize((target_width, target_height))
+
+    # 이미지 붙이기
+    card.paste(user_img, (40, 40))
+    
+    # 3. 텍스트 추가 (폰트 로드 시도)
+    font_path = download_korean_font()
     try:
-        color_desc = ", ".join([f"RGB({c[0]},{c[1]},{c[2]})" for c in colors])
+        title_font = ImageFont.truetype(font_path, 50)
+        date_font = ImageFont.truetype(font_path, 30)
+    except:
+        title_font = ImageFont.load_default()
+        date_font = ImageFont.load_default()
+    
+    # 도시 이름
+    draw.text((40, target_height + 60), city_name, font=title_font, fill='black')
+    # 날짜
+    draw.text((40, target_height + 120), date_str, font=date_font, fill='gray')
+    
+    # 4. 팔레트 그리기 (원형)
+    start_x = 40
+    start_y = target_height + 170
+    for color in colors:
+        draw.ellipse((start_x, start_y, start_x+50, start_y+50), fill=color, outline='gray')
+        start_x += 60
         
-        # [수정] 프롬프트: 랜드마크를 명확히 지정하고, 색상은 '분위기'로 적용
-        prompt = f"A high-quality realistic landscape painting of the famous landmark in {city_name}. The sky, lighting, and atmosphere must reflect this color palette: {color_desc}. Highly detailed, 8k resolution, cinematic lighting, wide angle view."
-        
-        # Pollinations AI URL (GET 방식)
-        image_url = f"https://pollinations.ai/p/{prompt}?width=768&height=512&seed={int(time.time())}"
-        
-        response = requests.get(image_url)
-        response.raise_for_status()
-        return response.content
-    except Exception as e:
-        st.error(f"이미지 생성 서버 연결 실패: {e}")
-        return None
+    return card
 
 # --- API 함수들 ---
 @st.cache_data(ttl=3600)
@@ -318,7 +344,7 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
 
 def get_packing_tips(avg_temp, rain_sum):
     tips = []
-    if avg_temp < 5: tips.append("🧥 두꺼운 패딩, 장갑 (추움)")
+    if avg_temp < 5: tips.append("🧥 패딩, 장갑 (추움)")
     elif 5 <= avg_temp < 15: tips.append("🧥 경량 패딩, 자켓 (쌀쌀)")
     elif 15 <= avg_temp < 22: tips.append("👕 긴팔, 가디건 (쾌적)")
     elif avg_temp >= 22: tips.append("👕 반팔, 선글라스 (더움)")
@@ -518,7 +544,6 @@ def run_mode_chat():
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
                         headers = {'Content-Type': 'application/json'}
-                        # 1. 검색 포함 시도
                         data = {"contents": [{"parts": [{"text": f"System: Today is {curr_date}. Use search for latest info. Do not write code.\nUser: {prompt}"}]}], "tools": [{"googleSearchRetrieval": {}}]}
                         resp = requests.post(url, headers=headers, json=data)
                         if resp.status_code == 200:
@@ -526,7 +551,6 @@ def run_mode_chat():
                             st.markdown(ai_msg)
                             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                             success = True; break
-                        # 2. 검색 제외 시도 (Fallback)
                         else:
                             del data['tools']
                             resp = requests.post(url, headers=headers, json=data)
@@ -538,54 +562,59 @@ def run_mode_chat():
                     except: continue
                 if not success: st.error("AI 연결 실패")
 
-# [수정] 4. AI 사진 작가 (오류 해결 + 통합 로직)
+# [최종 수정] 4. 여행 기록 카드 만들기 (안정적 기능으로 대체)
 def run_mode_photo_artist():
-    st.header("🎨 AI 여행 화가 (Photo Artist)")
-    st.info("여행지에서 찍은 사진의 색감을 추출해, 그 감성 그대로 랜드마크 그림을 그려드립니다.")
+    st.header("📸 여행 네컷 (Memory Card)")
+    st.info("여행지에서 찍은 사진들을 모아 예쁜 기록 카드를 만들어 드립니다.")
     
     col1, col2 = st.columns([1, 1])
     with col1:
-        city_name = st.text_input("도시 또는 랜드마크 이름 (예: 파리 에펠탑)", "파리 에펠탑")
+        city_name = st.text_input("도시 이름", "파리 에펠탑")
+        trip_date = st.date_input("여행 날짜", value=datetime.now().date())
     with col2:
-        # [수정] accept_multiple_files=True 옵션 적용
+        # 여러 장 업로드 허용
         uploaded_files = st.file_uploader("사진 업로드 (여러 장 가능)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
 
     if uploaded_files:
         st.write("---")
         
-        # [수정] 여러 이미지를 하나로 통합하는 로직
+        # 미리보기 및 통합 색상 추출
         images_list = []
         for uploaded_file in uploaded_files:
             uploaded_file.seek(0)
             img = Image.open(uploaded_file)
             images_list.append(img)
             
-        # 미리보기 (작게)
         st.image(images_list, width=100, caption=[f"사진 {i+1}" for i in range(len(images_list))])
         
-        # 통합 색상 추출
-        st.write("### 🎨 전체 사진의 통합 색감")
-        colors = extract_colors_from_multiple(uploaded_files) # 파일 리스트 전달
-        if colors:
-            display_color_palette(colors)
-        else:
-            st.warning("색상을 추출할 수 없습니다.")
+        st.write("### 🎨 추출된 감성 팔레트")
+        colors = extract_colors_from_multiple(uploaded_files)
+        if colors: display_color_palette(colors)
         
-        if st.button(f"이 색감으로 '{city_name}' 그리기 🖌️"):
-            with st.spinner("AI 화가가 그림을 그리고 있습니다... (약 5초 소요)"):
-                # [수정] Pollinations AI 사용 (무조건 성공)
-                image_bytes = generate_landmark_image(city_name, colors)
-                
-                if image_bytes:
-                    st.success("✨ 완성되었습니다!")
-                    st.image(image_bytes, caption=f"{city_name} (나만의 색감)", use_column_width=True)
-                    
-                    st.download_button(
-                        label="🖼️ 그림 다운로드",
-                        data=image_bytes,
-                        file_name=f"Art_{city_name}.png",
-                        mime="image/png"
-                    )
+        st.divider()
+        st.subheader("🖼️ 나만의 여행 카드 만들기")
+        
+        # 카드에 넣을 메인 사진 선택
+        selected_idx = st.selectbox("카드에 크게 넣을 사진을 골라주세요", range(len(uploaded_files)), format_func=lambda x: f"사진 {x+1}")
+        
+        if st.button("✨ 카드 생성하기", type="primary", use_container_width=True):
+            # 선택한 이미지 다시 로드
+            uploaded_files[selected_idx].seek(0)
+            target_img = uploaded_files[selected_idx]
+            
+            # 카드 생성 함수 호출
+            card_img = create_memory_card(target_img, city_name, trip_date.strftime("%Y.%m.%d"), colors)
+            
+            # 결과 출력
+            st.image(card_img, caption=f"Memory of {city_name}", use_column_width=True)
+            
+            # 다운로드 버튼
+            buf = BytesIO()
+            card_img.save(buf, format="PNG")
+            byte_im = buf.getvalue()
+            st.download_button("💾 카드 저장하기", byte_im, f"Memory_{city_name}.png", "image/png", use_container_width=True)
+    else:
+        st.info("👆 사진을 먼저 업로드해주세요.")
 
 # --- 메인 실행 ---
 def main():
@@ -593,7 +622,7 @@ def main():
     check_api_keys()
     with st.sidebar:
         st.title("✈️ 메뉴")
-        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)", "AI 화가 (New)"])
+        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)", "여행 네컷 (Memory)"])
         st.write("---")
         st.subheader("💸 환율 계산기")
         rates = get_exchange_rates()
@@ -605,7 +634,7 @@ def main():
     if app_mode == "개인 맞춤형 (Single)": run_mode_single_trip()
     elif app_mode == "장기 여행 (Long-term)": run_mode_long_trip()
     elif app_mode == "AI 상담소 (Chat)": run_mode_chat()
-    elif app_mode == "AI 화가 (New)": run_mode_photo_artist()
+    elif app_mode == "여행 네컷 (Memory)": run_mode_photo_artist()
 
 if __name__ == "__main__":
     main()
