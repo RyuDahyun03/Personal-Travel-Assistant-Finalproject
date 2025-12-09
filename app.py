@@ -212,7 +212,7 @@ def draw_route_map(route_cities):
 
 # 단기 여행: 엔터 검색 및 입력창 초기화 적용
 def run_mode_single_trip():
-    st.header("🎯 개인 맞춤형 여행 추천")
+    st.header("🧳 개인 맞춤형 여행 추천")
 
     # 콜백 함수: 검색 실행 및 입력창 초기화
     def handle_search():
@@ -227,7 +227,7 @@ def run_mode_single_trip():
     c1, c2 = st.columns([3, 1], vertical_alignment="bottom") 
     with c1: 
         # on_change로 엔터 입력 시 검색 실행
-        st.text_input("✈️ 어디로 떠나시나요?", placeholder="도시명 (예: 파리, 도쿄) 입력 후 Enter", key="single_city_input", on_change=handle_search)
+        st.text_input("✈️ 어디로 떠나시나요?", placeholder="도시명 (예: 파리, 도쿄)", key="single_city_input", on_change=handle_search)
     with c2: 
         # 버튼 클릭 시에도 동일한 로직 실행
         st.button("도시 검색 🔍", on_click=handle_search, use_container_width=True)
@@ -241,7 +241,7 @@ def run_mode_single_trip():
             c1, c2 = st.columns(2)
             with c1: theme = st.selectbox("테마", options=THEME_OSM_MAP.keys())
             with c2: budget = st.number_input("1일 예산 (원)", 200000, step=10000)
-            style = st.radio("스타일", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], index=1, horizontal=True)
+            style = st.radio("스타일", ["절약", "일반", "럭셔리"], index=1, horizontal=True)
             mode = st.radio("우선순위", ["연차 효율 (휴일 포함)", "비용 절감 (휴일 제외)"], horizontal=True)
             today = datetime.now().date()
             dates = st.date_input("기간", value=(today+timedelta(30), today+timedelta(90)), min_value=today, max_value=today+timedelta(365))
@@ -317,7 +317,7 @@ def run_mode_long_trip():
 
     c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
     with c1: 
-        st.text_input("도시 검색 (예: 런던, 파리) 입력 후 Enter", key="multi_input_key", on_change=handle_add_city)
+        st.text_input("도시 검색 (예: 런던, 파리)", key="multi_input_key", on_change=handle_add_city)
     with c2: 
         st.button("추가 ➕", on_click=handle_add_city, use_container_width=True)
     
@@ -337,7 +337,7 @@ def run_mode_long_trip():
     with col1: start_date = st.date_input("시작일", value=datetime.now().date()+timedelta(30))
     with col2: total_weeks = st.slider("기간 (주)", 1, 24, 4)
     daily_budget = st.number_input("1일 예산 (원)", 150000)
-    travel_style = st.radio("스타일", ["배낭여행 (절약)", "일반 (표준)", "럭셔리 (여유)"], horizontal=True)
+    travel_style = st.radio("스타일", ["절약", "일반", "럭셔리"], horizontal=True)
 
     if st.button("🚀 루트 최적화", type="primary"):
         cities = st.session_state['selected_cities_data']
@@ -417,7 +417,7 @@ def run_mode_long_trip():
         st.download_button("📥 PDF 다운로드", p_bytes, "LongTrip.pdf", "application/pdf")
 
 def run_mode_chat():
-    st.header("🤖 AI 여행 상담소")
+    st.header("🤖 AI Travel Planner")
     if not GEMINI_KEY: st.error("API 키 없음"); return
     if "messages" not in st.session_state: st.session_state.messages = [{"role": "assistant", "content": "안녕하세요! ✈️"}]
     for msg in st.session_state.messages: st.chat_message(msg["role"]).markdown(msg["content"])
@@ -453,11 +453,11 @@ def run_mode_chat():
 
 # --- 메인 실행 ---
 def main():
-    st.set_page_config(page_title="Travel Planner AI", page_icon="✈️", layout="wide")
+    st.set_page_config(page_title="Personal AI Travel Planner", page_icon="✈️", layout="wide")
     check_api_keys()
     with st.sidebar:
         st.title("✈️ 메뉴")
-        app_mode = st.radio("모드 선택", ["개인 맞춤형 (Single)", "장기 여행 (Long-term)", "AI 상담소 (Chat)"])
+        app_mode = st.radio("모드 선택", ["Short-Term", "Long-Term", "AI Travel Planner"])
         st.write("---")
         st.subheader("💸 환율 계산기")
         rates = get_exchange_rates()
@@ -466,9 +466,9 @@ def main():
             curr = st.selectbox("통화", ["USD", "JPY", "EUR", "CNY"])
             st.metric(f"{curr} 환산", f"{amt * rates.get(curr, 0):,.2f}")
     
-    if app_mode == "개인 맞춤형 (Single)": run_mode_single_trip()
-    elif app_mode == "장기 여행 (Long-term)": run_mode_long_trip()
-    elif app_mode == "AI 상담소 (Chat)": run_mode_chat()
+    if app_mode == "Short-Term": run_mode_single_trip()
+    elif app_mode == "Long-Term": run_mode_long_trip()
+    elif app_mode == "AI Travel Planner": run_mode_chat()
 
 if __name__ == "__main__":
     main()
