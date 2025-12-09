@@ -94,83 +94,48 @@ def run_mode_chat():
 FINAL_WIDTH = 1080
 FINAL_HEIGHT = 1920
 
-def generate_collage(images, text):
-    num_images = len(images)
+def generate_collage(images, layout="1x4", caption_text="My Travel Cut"):
+    from PIL import Image, ImageDraw, ImageFont
 
-    grid_map = {2: 2, 3: 3, 4: 4}
-    grid_size = grid_map[num_images]
+    # --- 1. 레이아웃 파싱 (예: "2x2" → rows=2, cols=2) ---
+    rows, cols = map(int, layout.lower().split("x"))
 
-    collage = Image.new("RGB", (FINAL_WIDTH, FINAL_HEIGHT), "white")
+    # --- 2. 이미지 리사이즈 설정 ---
+    cell_w, cell_h = 500, 500
+    margin = 20   # 그리드 여백
+    border = 40   # 전체 흰색 테두리
 
-    text_space = 300
-    image_area_height = FINAL_HEIGHT - text_space
+    # --- 3. 캔버스 크기 계산 ---
+    collage_w = cols * cell_w + (cols + 1) * margin
+    collage_h = rows * cell_h + (rows + 1) * margin + 200  # 아래 텍스트 공간 포함
 
-    cell_width = FINAL_WIDTH // grid_size
-    cell_height = image_area_height // grid_size
-
-    idx = 0
-    for row in range(grid_size):
-        for col in range(grid_size):
-            if idx < num_images:
-                img = images[idx]
-            else:
-                img = images[-1]
-
-            resized = img.resize((cell_width, cell_height))
-
-            x = col * cell_width
-            y = row * cell_height
-            collage.paste(resized, (x, y))
-            idx += 1
-
+    # --- 4. 흰 배경 캔버스 ---
+    collage = Image.new("RGB", (collage_w + border*2, collage_h + border*2), "white")
     draw = ImageDraw.Draw(collage)
-    font_size = 80
+
+    # --- 5. 각 이미지 채우기 ---
+    for idx, img in enumerate(images[:rows*cols]):
+        img = img.resize((cell_w, cell_h))
+        r = idx // cols
+        c = idx % cols
+
+        x = border + margin + c * (cell_w + margin)
+        y = border + margin + r * (cell_h + margin)
+        collage.paste(img, (x, y))
+
+    # --- 6. 캡션 텍스트 (굵게 + 크게) ---
     try:
-        font = ImageFont.truetype("arial.ttf", font_size)
+        font = ImageFont.truetype("arial.ttf", 80)
     except:
         font = ImageFont.load_default()
 
-    text_x = FINAL_WIDTH // 2
-    text_y = FINAL_HEIGHT - (text_space // 2)
+    text_w, text_h = draw.textsize(caption_text, font=font)
+    text_x = (collage.width - text_w) // 2
+    text_y = collage.height - border - text_h - 30
 
-    draw.text((text_x, text_y), text, fill="black", anchor="mm", font=font)
+    draw.text((text_x, text_y), caption_text, font=font, fill="black")
 
     return collage
-
-
-def run_mode_collage():
-    st.subheader("📸 인생네컷 세로 콜라주 생성기")
-
-    uploaded_files = st.file_uploader(
-        "사진을 업로드하세요 (2~4장)",
-        type=["jpg", "png"],
-        accept_multiple_files=True
-    )
-
-    user_text = st.text_input("사진 하단에 들어갈 문구", "")
-
-    if uploaded_files:
-        if not (2 <= len(uploaded_files) <= 4):
-            st.error("사진은 2~4장까지만 업로드할 수 있습니다.")
-            return
-
-        images = [Image.open(f).convert("RGB") for f in uploaded_files]
-
-        if st.button("📷 콜라주 생성"):
-            collage = generate_collage(images, user_text)
-            st.image(collage, caption="생성된 인생네컷", use_column_width=True)
-
-            img_bytes = io.BytesIO()
-            collage.save(img_bytes, format="JPEG")
-            img_bytes.seek(0)
-
-            st.download_button(
-                label="📥 다운로드 (JPEG)",
-                data=img_bytes,
-                file_name="collage.jpg",
-                mime="image/jpeg"
-            )
-
 
 ############################################
 # 5. 메인 (AI 화가 기능 완전 삭제됨)
