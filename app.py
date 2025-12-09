@@ -210,7 +210,7 @@ def draw_route_map(route_cities):
 
 # --- 실행 함수들 ---
 
-# [수정됨] 단기 여행: 엔터 검색 및 입력창 초기화 적용
+# 단기 여행: 엔터 검색 및 입력창 초기화 적용
 def run_mode_single_trip():
     st.header("🎯 개인 맞춤형 여행 추천")
 
@@ -224,7 +224,7 @@ def run_mode_single_trip():
 
     if "search_result" not in st.session_state: st.session_state.search_result = None
 
-    c1, c2 = st.columns([3, 1], vertical_alignment="bottom") # 버튼 정렬 맞춤
+    c1, c2 = st.columns([3, 1], vertical_alignment="bottom") 
     with c1: 
         # on_change로 엔터 입력 시 검색 실행
         st.text_input("✈️ 어디로 떠나시나요?", placeholder="도시명 (예: 파리, 도쿄) 입력 후 Enter", key="single_city_input", on_change=handle_search)
@@ -294,7 +294,7 @@ def run_mode_single_trip():
                 p_bytes = create_pdf_report(f"Travel Plan: {city_data['name'].split(',')[0]}", pdf_list)
                 st.download_button("📄 PDF 다운로드", p_bytes, "Trip.pdf", "application/pdf")
 
-# [수정됨] 장기 여행: 엔터 추가 및 입력창 초기화 적용
+# 장기 여행: 엔터 추가, 입력창 초기화 + 거리 효율성 리포트 추가
 def run_mode_long_trip():
     st.header("🌏 장기 여행 (루트 최적화)")
     if 'selected_cities_data' not in st.session_state: st.session_state['selected_cities_data'] = []
@@ -307,13 +307,13 @@ def run_mode_long_trip():
                 found = search_city_coordinates(new_city)
                 if found:
                     if any(c['name'] == found['name'] for c in st.session_state['selected_cities_data']):
-                        st.toast("⚠️ 이미 추가된 도시입니다.") # 경고를 toast로 변경하여 UI 유지
+                        st.toast("⚠️ 이미 추가된 도시입니다.")
                     else:
                         st.session_state['selected_cities_data'].append(found)
                         st.toast(f"✅ {found['name'].split(',')[0]} 추가 완료!")
                 else:
                     st.toast("❌ 도시를 찾을 수 없습니다.")
-            st.session_state.multi_input_key = "" # 입력창 초기화
+            st.session_state.multi_input_key = "" 
 
     c1, c2 = st.columns([3, 1], vertical_alignment="bottom")
     with c1: 
@@ -322,8 +322,9 @@ def run_mode_long_trip():
         st.button("추가 ➕", on_click=handle_add_city, use_container_width=True)
     
     if st.session_state['selected_cities_data']:
-        st.write("### 📋 선택 목록")
-        for i, c in enumerate(st.session_state['selected_cities_data']): st.text(f"{i+1}. {c['name']}")
+        st.write("### 📋 선택 목록 (입력 순서)")
+        for i, c in enumerate(st.session_state['selected_cities_data']): 
+            st.text(f"{i+1}. {c['name']}")
         if st.button("초기화 🗑️"): st.session_state['selected_cities_data'] = []; st.rerun()
     else: st.info("도시를 추가해주세요."); return
 
@@ -341,26 +342,57 @@ def run_mode_long_trip():
     if st.button("🚀 루트 최적화", type="primary"):
         cities = st.session_state['selected_cities_data']
         if len(cities) < 2: st.warning("2개 이상 필요"); st.stop()
+
+        # 1. 원래 순서 (사용자가 입력한 순서 + 출발지 고려)
+        original_route = [start_city] + [c for c in cities if c['name'] != start_city['name']]
+        
+        # 원래 거리 계산
+        dist_original = 0
+        for i in range(len(original_route)-1):
+            dist_original += calculate_distance(original_route[i]['lat'], original_route[i]['lon'], original_route[i+1]['lat'], original_route[i+1]['lon'])
+
+        # 2. 최적화 알고리즘 (Nearest Neighbor)
         route = [start_city]
         unvisited = [c for c in cities if c['name'] != start_city['name']]
         curr = start_city
+        
         while unvisited:
             nearest = min(unvisited, key=lambda x: calculate_distance(curr['lat'], curr['lon'], x['lat'], x['lon']))
             route.append(nearest)
             unvisited.remove(nearest)
             curr = nearest
+        
+        # 최적 거리 계산
+        dist_optimized = 0
+        for i in range(len(route)-1):
+            dist_optimized += calculate_distance(route[i]['lat'], route[i]['lon'], route[i+1]['lat'], route[i+1]['lon'])
 
-        days_per = max(2, (total_weeks*7) // len(route))
+        # 절감 거리 및 비율
+        saved_km = dist_original - dist_optimized
+        saved_percent = (saved_km / dist_original * 100) if dist_original > 0 else 0
+
+        # --- 결과 화면 ---
         st.divider()
+        st.subheader("📊 루트 효율성 분석")
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric("기존 총 거리", f"{int(dist_original):,} km")
+        m2.metric("최적화된 거리", f"{int(dist_optimized):,} km", delta=f"-{int(saved_km):,} km (절약)", delta_color="inverse")
+        m3.metric("예상 항공 비용 절감", "효율적 이동", f"약 {int(saved_percent)}% 단축")
+
         st.subheader(f"🗺️ 추천 루트 ({len(route)}도시)")
         draw_route_map(route)
+        
         total_cost = calculate_travel_cost(daily_budget, total_weeks*7, travel_style)
-        st.metric("총 예상 경비 (항공권 제외)", f"약 {total_cost//10000}만 원")
+        st.metric("총 예상 체류 경비 (항공권 제외)", f"약 {total_cost//10000}만 원")
 
         st.write("---")
         st.subheader("📅 상세 일정")
         curr_date = start_date
-        pdf_lines = ["=== 세계일주 루트 ===", ""]
+        pdf_lines = ["=== 세계일주 루트 ===", "", f"총 거리: {int(dist_optimized):,} km (기존 대비 {int(saved_km):,} km 단축)"]
+        
+        days_per = max(2, (total_weeks*7) // len(route))
+        
         for idx, city in enumerate(route):
             stay = (start_date + timedelta(total_weeks*7) - curr_date).days if idx == len(route)-1 else days_per
             arr, dep = curr_date, curr_date + timedelta(stay)
