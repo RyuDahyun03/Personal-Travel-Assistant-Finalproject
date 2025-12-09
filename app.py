@@ -170,6 +170,24 @@ def calculate_distance(lat1, lon1, lat2, lon2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+@st.cache_data(ttl=3600)
+def search_city_coordinates(city_name):
+    clean_name = city_name.strip().replace(" ", "")
+    if clean_name in FALLBACK_CITIES:
+        data = FALLBACK_CITIES[clean_name]
+        return {"name": city_name, "lat": data['lat'], "lon": data['lon'], "country_code": data['code']}
+    try:
+        url = "https://nominatim.openstreetmap.org/search"
+        params = {"q": city_name, "format": "json", "limit": 1, "accept-language": "ko"}
+        headers = {'User-Agent': 'TravelApp_Student_Project/1.0 (contact@example.com)'}
+        res = requests.get(url, params=params, headers=headers)
+        res.raise_for_status()
+        data = res.json()
+        if data:
+            return {"name": data[0]['display_name'], "lat": float(data[0]['lat']), "lon": float(data[0]['lon']), "country_code": data[0].get('address', {}).get('country_code', 'KR').upper()}
+        return None
+    except: return None
+
 # [신규] 이미지에서 주요 색상 추출 함수
 def extract_colors(image, num_colors=4):
     small_img = image.resize((100, 100))
@@ -189,9 +207,8 @@ def display_color_palette(colors):
     html_code += '</div>'
     st.markdown(html_code, unsafe_allow_html=True)
 
-# [수정] 이미지 생성 API 호출 (모델명 수정: imagen-3.0)
+# [수정] 이미지 생성 API 호출 (모델명 수정: imagen-3.0-generate-001)
 def generate_landmark_image(city_name, colors):
-    # [수정] 모델명을 imagen-3.0-generate-001로 변경
     url = f"https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key={GEMINI_KEY}"
     
     color_desc = ", ".join([f"RGB{c}" for c in colors])
@@ -215,29 +232,8 @@ def generate_landmark_image(city_name, colors):
         img_data = result['predictions'][0]['bytesBase64Encoded']
         return img_data
     except Exception as e:
-        # 오류 발생 시 디버깅을 위해 에러 메시지 출력
         st.error(f"이미지 생성 실패: {e}")
-        if 'response' in locals():
-            st.error(f"상세 오류: {response.text}")
         return None
-
-@st.cache_data(ttl=3600)
-def search_city_coordinates(city_name):
-    clean_name = city_name.strip().replace(" ", "")
-    if clean_name in FALLBACK_CITIES:
-        data = FALLBACK_CITIES[clean_name]
-        return {"name": city_name, "lat": data['lat'], "lon": data['lon'], "country_code": data['code']}
-    try:
-        url = "https://nominatim.openstreetmap.org/search"
-        params = {"q": city_name, "format": "json", "limit": 1, "accept-language": "ko"}
-        headers = {'User-Agent': 'TravelApp_Student_Project/1.0 (contact@example.com)'}
-        res = requests.get(url, params=params, headers=headers)
-        res.raise_for_status()
-        data = res.json()
-        if data:
-            return {"name": data[0]['display_name'], "lat": float(data[0]['lat']), "lon": float(data[0]['lon']), "country_code": data[0].get('address', {}).get('country_code', 'KR').upper()}
-        return None
-    except: return None
 
 # --- API 함수들 ---
 @st.cache_data(ttl=3600)
@@ -309,10 +305,10 @@ def calculate_daily_score(df, local_holidays, kr_holidays, priority_mode):
 def get_packing_tips(avg_temp, rain_sum):
     tips = []
     if avg_temp < 5: tips.append("🧥 패딩, 장갑 (추움)")
-    elif 5 <= avg_temp < 15: tips.append("🧥 경량 패딩, 자켓")
-    elif 15 <= avg_temp < 22: tips.append("👕 긴팔, 가디건")
+    elif 5 <= avg_temp < 15: tips.append("🧥 경량 패딩, 자켓 (쌀쌀)")
+    elif 15 <= avg_temp < 22: tips.append("👕 긴팔, 가디건 (쾌적)")
     elif avg_temp >= 22: tips.append("👕 반팔, 선글라스 (더움)")
-    if rain_sum > 30: tips.append("☂️ 우산/우비")
+    if rain_sum > 30: tips.append("☂️ 우산/우비 필수")
     if avg_temp > 25: tips.append("🧴 선크림")
     return ", ".join(tips)
 
@@ -502,7 +498,7 @@ def run_mode_chat():
         with st.chat_message("assistant"):
             with st.spinner("생각 중..."):
                 curr_date = datetime.now().strftime("%Y-%m-%d")
-                candidates = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-pro"]
+                candidates = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
                 success = False
                 for model in candidates:
                     try:
@@ -528,7 +524,7 @@ def run_mode_chat():
                     except: continue
                 if not success: st.error("AI 연결 실패")
 
-# [신규] 4. AI 사진 작가 (Photo Artist) 모드
+# [수정: accept_multiple_files=True 적용 및 반복문 처리]
 def run_mode_photo_artist():
     st.header("🎨 AI 여행 화가 (Photo Artist)")
     st.info("여행지에서 찍은 사진의 색감을 추출해, 그 감성 그대로 랜드마크 그림을 그려드립니다.")
@@ -537,33 +533,39 @@ def run_mode_photo_artist():
     with col1:
         city_name = st.text_input("도시 또는 랜드마크 이름 (예: 파리 에펠탑)", "파리 에펠탑")
     with col2:
-        uploaded_file = st.file_uploader("사진 업로드", type=["jpg", "png", "jpeg"])
+        # [수정] 여러 장 업로드 허용
+        uploaded_files = st.file_uploader("사진 업로드 (여러 장 가능)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
 
-    if uploaded_file is not None:
-        image = Image.open(uploaded_file)
-        st.image(image, caption="업로드한 사진", width=300)
-        
-        # 색상 추출
-        st.write("### 🎨 추출된 나만의 팔레트")
-        colors = extract_colors(image)
-        display_color_palette(colors)
-        
-        if st.button("이 색감으로 그림 그리기 🖌️"):
-            with st.spinner("AI 화가가 그림을 그리고 있습니다... (약 10초 소요)"):
-                generated_image_b64 = generate_landmark_image(city_name, colors)
+    if uploaded_files:
+        st.write("---")
+        # [수정] 반복문으로 여러 장 처리
+        for i, uploaded_file in enumerate(uploaded_files):
+            col_img, col_palette = st.columns([1, 2])
+            
+            image = Image.open(uploaded_file)
+            with col_img:
+                st.image(image, caption=f"사진 {i+1}", use_container_width=True)
+            
+            with col_palette:
+                st.write(f"**🎨 추출된 팔레트 ({i+1})**")
+                colors = extract_colors(image)
+                display_color_palette(colors)
                 
-                if generated_image_b64:
-                    st.success("✨ 완성되었습니다!")
-                    # Base64를 이미지로 디코딩하여 표시
-                    st.image(base64.b64decode(generated_image_b64), caption=f"{city_name} (나만의 색감)", use_column_width=True)
-                    
-                    # 다운로드 버튼
-                    st.download_button(
-                        label="🖼️ 그림 다운로드",
-                        data=base64.b64decode(generated_image_b64),
-                        file_name=f"Art_{city_name}.png",
-                        mime="image/png"
-                    )
+                # 버튼 키(key)를 고유하게 설정
+                if st.button(f"이 색감으로 '{city_name}' 그리기 🖌️", key=f"btn_gen_{i}"):
+                    with st.spinner("AI 화가가 그림을 그리고 있습니다... (약 10초 소요)"):
+                        generated_image_b64 = generate_landmark_image(city_name, colors)
+                        if generated_image_b64:
+                            st.success("✨ 완성!")
+                            st.image(base64.b64decode(generated_image_b64), caption=f"{city_name} (사진 {i+1} 기반)", use_container_width=True)
+                            st.download_button(
+                                label="🖼️ 다운로드",
+                                data=base64.b64decode(generated_image_b64),
+                                file_name=f"Art_{city_name}_{i+1}.png",
+                                mime="image/png",
+                                key=f"btn_down_{i}"
+                            )
+            st.divider()
 
 # --- 메인 실행 ---
 def main():
