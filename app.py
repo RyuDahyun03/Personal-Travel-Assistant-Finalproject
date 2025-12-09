@@ -19,7 +19,7 @@ THEME_OSM_MAP = {
     "휴양/공원 🌳": '"leisure"="park"'
 }
 
-# --- 1. 내장 도시 데이터 ---
+# --- 1. 내장 도시 데이터 (1차 방어선 - API 오류 방지용) ---
 FALLBACK_CITIES = {
     "서울": {"lat": 37.5665, "lon": 126.9780, "code": "KR", "country": "한국"},
     "제주": {"lat": 33.4996, "lon": 126.5312, "code": "KR", "country": "한국"},
@@ -189,15 +189,17 @@ def search_city_coordinates(city_name):
         return None
     except: return None
 
-# [핵심 기능] 다중 이미지 통합 및 색상 추출
-def extract_colors_from_multiple(image_list, num_colors=4):
-    if not image_list: return []
+# [수정] 다중 이미지 통합 및 색상 추출 (사용자 제공 코드 통합)
+def extract_colors_from_multiple(uploaded_files, num_colors=4):
+    if not uploaded_files: return []
     
-    # 1. 모든 이미지를 썸네일 크기로 축소 (메모리 절약)
+    # 1. 업로드된 파일에서 이미지 열기 및 썸네일 생성
     resized_images = []
-    for img_file in image_list:
-        img = Image.open(img_file)
-        img.thumbnail((150, 150)) # 썸네일 생성
+    for uploaded_file in uploaded_files:
+        # 파일 포인터를 처음으로 되돌리기
+        uploaded_file.seek(0)
+        img = Image.open(uploaded_file).convert('RGB')
+        img.thumbnail((150, 150))
         resized_images.append(img)
     
     # 2. 통합 이미지 생성 (가로로 이어 붙이기)
@@ -229,7 +231,7 @@ def display_color_palette(colors):
     html_code += '</div>'
     st.markdown(html_code, unsafe_allow_html=True)
 
-# [수정] 이미지 생성 (Pollinations AI 사용 - 무료, 키 불필요, 100% 작동)
+# [수정] 이미지 생성 (Pollinations AI 사용 - 오류 방지용)
 def generate_landmark_image(city_name, colors):
     try:
         color_desc = ", ".join([f"RGB({c[0]},{c[1]},{c[2]})" for c in colors])
@@ -237,7 +239,6 @@ def generate_landmark_image(city_name, colors):
         # 프롬프트 생성 (영어)
         prompt = f"A beautiful artistic painting of {city_name} landmark, landscape, highly detailed, dreamy style. Key colors to emphasize: {color_desc}. Cinematic lighting, impressionist style."
         
-        # URL 인코딩 및 호출
         # Pollinations AI는 GET 요청으로 이미지를 바로 반환합니다.
         image_url = f"https://pollinations.ai/p/{prompt}?width=768&height=512&seed={int(time.time())}"
         
@@ -409,16 +410,16 @@ def run_mode_single_trip():
                 for i, p in enumerate(top3):
                     ps, pe = p['s'].strftime('%Y-%m-%d'), p['e'].strftime('%Y-%m-%d')
                     tm, rn = p['win']['temperature_2m_max'].mean(), p['win']['precipitation_sum'].sum()
-                    free = p['win']['is_free_day'].sum()
-                    cost = calculate_travel_cost(budget, dur, style)
+                    fr = p['win']['is_free_day'].sum()
+                    co = calculate_travel_cost(budget, dur, style)
                     tp = get_packing_tips(tm, rn)
-                    pdf_list.append(f"[{i+1}위] {ps}~{pe} / {tm:.1f}도 / {cost:,}원")
+                    pdf_list.append(f"[{i+1}위] {ps}~{pe} / {tm:.1f}도 / {co:,}원")
                     with st.expander(f"{['🥇','🥈','🥉'][i] if i<3 else ''} {i+1}위: {ps}~{pe}", expanded=(i==0)):
                         c1, c2, c3, c4 = st.columns(4)
                         c1.metric("기온", f"{tm:.1f}°C")
                         c2.metric("강수", f"{rn:.1f}mm")
                         c3.metric("휴일", f"{fr}일")
-                        c4.metric("경비", f"{cost//10000}만 원")
+                        c4.metric("경비", f"{co//10000}만 원")
                         st.info(f"🧳 {tp}")
                         st.link_button("✈️ 항공권 검색", get_flight_link(city_data['name']))
                 
@@ -514,13 +515,12 @@ def run_mode_chat():
         with st.chat_message("assistant"):
             with st.spinner("생각 중..."):
                 curr_date = datetime.now().strftime("%Y-%m-%d")
-                candidates = ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-1.5-flash", "gemini-pro"]
+                candidates = ["gemini-2.0-flash-exp", "gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro"]
                 success = False
                 for model in candidates:
                     try:
                         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_KEY}"
                         headers = {'Content-Type': 'application/json'}
-                        # 1. 검색 포함 시도
                         data = {"contents": [{"parts": [{"text": f"System: Today is {curr_date}. Use search for latest info. Do not write code.\nUser: {prompt}"}]}], "tools": [{"googleSearchRetrieval": {}}]}
                         resp = requests.post(url, headers=headers, json=data)
                         if resp.status_code == 200:
@@ -528,7 +528,6 @@ def run_mode_chat():
                             st.markdown(ai_msg)
                             st.session_state.messages.append({"role": "assistant", "content": ai_msg})
                             success = True; break
-                        # 2. 검색 제외 시도 (Fallback)
                         else:
                             del data['tools']
                             resp = requests.post(url, headers=headers, json=data)
@@ -540,38 +539,48 @@ def run_mode_chat():
                     except: continue
                 if not success: st.error("AI 연결 실패")
 
-# [수정] 4. AI 사진 작가 모드 (다중 이미지 통합 + Pollinations AI)
+# [수정] 4. AI 사진 작가 모드 (사용자 UI 및 통합 로직 반영)
 def run_mode_photo_artist():
     st.header("🎨 AI 여행 화가 (Photo Artist)")
-    st.info("여러 장의 사진을 올리면, 전체적인 색감을 추출하여 여행지의 풍경을 그려드립니다.")
+    st.info("여러 장의 사진을 올리면, 각 사진의 주요 색상을 추출하여 여행지의 풍경을 그 색감으로 그려드립니다.")
     
     col1, col2 = st.columns([1, 1])
     with col1:
         city_name = st.text_input("도시 또는 랜드마크 이름 (예: 파리 에펠탑)", "파리 에펠탑")
     with col2:
-        # [수정] accept_multiple_files=True 옵션 추가
-        uploaded_files = st.file_uploader("사진 업로드 (여러 장 가능)", type=["jpg", "png", "jpeg"], accept_multiple_files=True)
+        # 여러 장 동시 선택 가능
+        uploaded_files = st.file_uploader(
+            "사진 업로드 (여러 장 선택 가능)", 
+            type=["jpg", "png", "jpeg"], 
+            accept_multiple_files=True,
+            help="갤러리에서 Ctrl/Cmd 클릭으로 여러 장 선택 후 한 번에 업로드하세요"
+        )
 
-    if uploaded_files:
+    if uploaded_files and len(uploaded_files) > 0:
         st.write("---")
+        st.success(f"✅ {len(uploaded_files)}장의 사진이 업로드되었습니다!")
         
-        # [신규] 여러 이미지를 하나로 통합하는 로직
-        images_list = []
-        for uploaded_file in uploaded_files:
-            img = Image.open(uploaded_file)
-            images_list.append(img)
-            
-        # 미리보기 (작게)
-        st.image(images_list, width=100, caption=[f"사진 {i+1}" for i in range(len(images_list))])
+        # 업로드된 사진 미리보기
+        cols = st.columns(min(len(uploaded_files), 5))
+        for idx, uploaded_file in enumerate(uploaded_files):
+            with cols[idx % 5]:
+                uploaded_file.seek(0)  # 파일 포인터 초기화
+                img = Image.open(uploaded_file)
+                st.image(img, caption=f"사진 {idx+1}", use_column_width=True)
         
         # 통합 색상 추출
-        st.write("### 🎨 전체 사진의 통합 색감")
-        colors = extract_colors_from_multiple(images_list) # 리스트 전체 전달
-        display_color_palette(colors)
+        st.write("### 🎨 추출된 색감 팔레트")
+        colors = extract_colors_from_multiple(uploaded_files)
         
-        if st.button(f"이 색감으로 '{city_name}' 그리기 🖌️"):
-            with st.spinner("AI 화가가 그림을 그리고 있습니다... (약 5초 소요)"):
-                # [수정] Pollinations AI 사용 (무조건 성공)
+        if colors:
+            display_color_palette(colors)
+            st.caption(f"📊 전체 {len(uploaded_files)}장의 사진에서 주요 색상 {len(colors)}개를 추출했습니다.")
+        else:
+            st.warning("색상 추출에 실패했습니다.")
+            return
+        
+        if st.button(f"🖌️ 이 색감으로 '{city_name}' 그리기", type="primary", use_container_width=True):
+            with st.spinner("AI 화가가 그림을 그리고 있습니다... (약 10초 소요)"):
                 image_bytes = generate_landmark_image(city_name, colors)
                 
                 if image_bytes:
@@ -581,9 +590,14 @@ def run_mode_photo_artist():
                     st.download_button(
                         label="🖼️ 그림 다운로드",
                         data=image_bytes,
-                        file_name=f"Art_{city_name}.png",
-                        mime="image/png"
+                        file_name=f"Art_{city_name.replace(' ', '_')}.png",
+                        mime="image/png",
+                        use_container_width=True
                     )
+                else:
+                    st.error("이미지 생성에 실패했습니다. 다시 시도해주세요.")
+    else:
+        st.info("👆 위에서 여러 장의 사진을 선택하여 업로드해주세요. (Ctrl/Cmd + 클릭으로 복수 선택)")
 
 # --- 메인 실행 ---
 def main():
