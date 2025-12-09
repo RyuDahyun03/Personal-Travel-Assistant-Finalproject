@@ -10,6 +10,7 @@ import time
 from PIL import Image, ImageDraw, ImageFont
 import base64
 from io import BytesIO
+import json # 최상단 import 모음에 이 줄이 없다면 추가해주세요
 
 # --- 설정: 테마 매핑 ---
 THEME_OSM_MAP = {
@@ -480,7 +481,16 @@ def run_mode_chat():
                     except: continue
                 if not success: st.error("AI 연결 실패")
 
+# --- 1. 내장 도시 데이터 (JSON 파일 로드) ---
+@st.cache_data
+def load_fallback_cities():
+    file_path = "city_coordinates.json"
+    if not os.path.exists(file_path):
+        return {} # 파일이 없으면 빈 딕셔너리 반환
+    with open(file_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
+FALLBACK_CITIES = load_fallback_cities()
 
 # --- 메인 실행 ---
 def main():
